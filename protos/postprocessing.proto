@@ -1,0 +1,33 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message BatchNonMaxSuppression {
+
+  optional float score_threshold = 1 [default = 0.0];
+
+  optional float iou_threshold = 2 [default = 0.6];
+
+  optional int32 max_detections_per_class = 3 [default = 100];
+
+  optional int32 max_total_detections = 5 [default = 100];
+}
+
+
+message PostProcessing {
+
+  enum ScoreConverter {
+
+    IDENTITY = 0;
+
+    SIGMOID = 1;
+
+    SOFTMAX = 2;
+  }
+
+  optional BatchNonMaxSuppression batch_non_max_suppression = 1;
+
+  optional ScoreConverter score_converter = 2 [default = IDENTITY];
+
+  optional float logit_scale = 3 [default = 1.0];
+}

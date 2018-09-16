@@ -1,0 +1,14 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/region_similarity_calculator.proto";
+import "detection/protos/matcher.proto";
+import "detection/protos/box_coder.proto";
+
+message TargetAssigner {
+  optional RegionSimilarityCalculator region_similarity_calculator = 1;
+  optional Matcher matcher = 2;
+  optional BoxCoder box_coder = 3;
+  optional float negative_class_weight = 4 [default = 1.0];
+}

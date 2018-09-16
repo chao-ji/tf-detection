@@ -1,0 +1,21 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message Matcher {
+  oneof matcher_oneof {
+    ArgMaxMatcher argmax_matcher = 1;
+  }
+}
+
+message ArgMaxMatcher {
+  optional float matched_threshold = 1 [default = 0.5];
+
+  optional float unmatched_threshold = 2 [default = 0.5];
+
+  optional bool ignore_thresholds = 3 [default = false];
+
+  optional bool negatives_lower_than_unmatched = 4 [default = true];
+
+  optional bool force_match_for_each_row = 5 [default = false];
+}

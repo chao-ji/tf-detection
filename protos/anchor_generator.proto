@@ -1,0 +1,37 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message AnchorGenerator {
+  oneof anchor_generator_oneof {
+    SSDAnchorGenerator ssd_anchor_generator = 2;
+  }
+}
+
+message SSDAnchorGenerator {
+  optional int32 num_layers = 1 [default = 6];
+
+  optional float min_scale = 2 [default = 0.2];
+
+  optional float max_scale = 3 [default = 0.95];
+
+  repeated float scales = 12;
+
+  repeated float aspect_ratios = 4;
+
+  optional float interpolated_scale_aspect_ratio = 13 [default = 1.0];
+
+  optional bool reduce_boxes_in_lowest_layer = 5 [default = true];
+
+  optional float base_anchor_height = 6 [default = 1.0];
+
+  optional float base_anchor_width = 7 [default = 1.0];
+
+  repeated int32 height_stride = 8;
+
+  repeated int32 width_stride = 9;
+
+  repeated int32 height_offset = 10;
+
+  repeated int32 width_offset = 11;
+}

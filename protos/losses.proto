@@ -1,0 +1,62 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message Loss {
+  optional ClassificationLoss classification_loss = 1;
+
+  optional LocalizationLoss localization_loss = 2;
+
+  optional HardExampleMiner hard_example_miner = 3;
+
+  optional float classification_weight = 4 [default = 1.0];
+
+  optional float localization_weight = 5 [default = 1.0]; 
+}
+
+message ClassificationLoss {
+  oneof classification_loss_oneof {
+    WeightedSigmoidClassificationLoss weighted_sigmoid = 1;
+    WeightedSoftmaxClassificationLoss weighted_softmax = 2;
+  }
+}
+
+message LocalizationLoss {
+  oneof localization_loss_oneof {
+    WeightedL2LocalizationLoss weighted_l2 = 1;
+    WeightedSmoothL1LocalizationLoss weighted_smooth_l1 = 2;
+  }
+}
+
+message WeightedSigmoidClassificationLoss {
+}
+
+message WeightedSoftmaxClassificationLoss {
+  optional float logit_scale = 2 [default = 1.0];
+}
+
+message WeightedL2LocalizationLoss {
+}
+
+message WeightedSmoothL1LocalizationLoss {
+  optional float delta = 2 [default = 1.0];
+}
+
+// Configuration for hard example miner
+message HardExampleMiner {
+
+  optional int32 num_hard_examples = 1 [default = 64];
+
+  optional float iou_threshold = 2 [default = 0.7];
+
+  enum LossType {
+    BOTH = 0;
+    CLASSIFICATION = 1;
+    LOCALIZATION = 2;
+  }
+  optional LossType loss_type = 3 [default=BOTH];
+
+  optional int32 max_negatives_per_positive = 4 [default = 0];
+
+  optional int32 min_negatives_per_image = 5 [default = 0];
+}

@@ -1,0 +1,17 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message BoxCoder {
+  oneof box_coder_oneof {
+    FasterRcnnBoxCoder faster_rcnn_box_coder = 1;
+  }
+}
+
+message FasterRcnnBoxCoder {
+  optional float y_scale = 1 [default = 10.0];
+  optional float x_scale = 2 [default = 10.0];
+
+  optional float height_scale = 3 [default = 5.0];
+  optional float width_scale = 4 [default = 5.0];
+}

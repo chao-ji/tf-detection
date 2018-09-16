@@ -1,0 +1,45 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/preprocessor.proto";
+import "detection/protos/decoder.proto";
+
+message Dataset {
+  optional DataDecoder data_decoder = 4;
+
+  optional TrainerDataset trainer_dataset = 1;
+
+  optional EvaluatorDataset evaluator_dataset = 2;
+
+  optional InferencerDataset inferencer_dataset = 3;
+}
+
+
+message TrainerDataset {
+  optional int32 batch_size = 1;
+
+  optional int32 num_epochs = 2 [default = -1];
+
+  optional Preprocessor preprocessor = 4;
+
+  optional bool shuffle = 6 [default = false];
+
+  optional int32 filename_dataset_shuffle_buffer_size = 7 [default = 100];
+
+  optional int32 record_dataset_shuffle_buffer_size = 8 [default = 2048];
+
+  optional int32 random_seed = 9 [default = 0];
+
+  optional int32 num_readers = 10 [default = 10];
+
+  optional int32 read_block_length = 11 [default = 32];
+}
+
+message EvaluatorDataset {
+  optional Preprocessor preprocessor = 4;
+}
+
+message InferencerDataset {
+}
+

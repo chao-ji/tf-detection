@@ -1,0 +1,16 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message RegionSimilarityCalculator {
+  oneof region_similarity_oneof {
+    IouSimilarity iou_similarity = 2;
+    IoaSimilarity ioa_similarity = 3;
+  }
+}
+
+message IouSimilarity {
+}
+
+message IoaSimilarity {
+}

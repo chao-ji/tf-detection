@@ -1,0 +1,39 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message DataDecoder {
+  repeated KeysToFeaturesItem keys_to_features = 1;
+}
+
+message KeysToFeaturesItem {
+  enum FeatureType {
+    STRING = 1;
+    FLOAT32 = 2;
+    INT64 = 3;
+  }
+
+  message Shape {
+    repeated int64 size = 1;
+  }
+
+  message FeatureParser {
+    oneof feature_parser_oneof {
+      FixedLenFeatureParser fixed_len_feature_parser = 1;
+      VarLenFeatureParser var_len_feature_parser = 2;
+    }  
+  }
+
+  message FixedLenFeatureParser {
+    optional FeatureType type = 1;
+    optional Shape shape = 2;
+  }
+
+  message VarLenFeatureParser {
+    optional FeatureType type = 1;
+  }
+
+  optional string key = 1;
+
+  optional FeatureParser feature_parser = 2;
+}

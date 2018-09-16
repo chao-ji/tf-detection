@@ -1,0 +1,76 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message ConvHyperparams {
+
+  enum Type {
+    CONV = 1;
+    FC = 2;
+  }
+
+  enum Activation {
+    NONE = 0;
+    RELU = 1;
+    RELU_6 = 2;
+  }
+
+  optional Type type = 1 [default = CONV];
+
+  optional Activation activation = 4 [default = RELU];
+
+  optional Regularizer regularizer = 2;
+
+  optional Initializer initializer = 3;
+
+  optional BatchNorm batch_norm = 5;
+
+  // Whether to regularize the depthwise convolutional weights within a 
+  // SeparableConv2d
+  optional bool regularize_depthwise = 6 [default = false];
+  // Whether to batch-norm the activations coming from the depthwise 
+  // convolution within a SeparableConv2d
+  optional bool batch_norm_depthwise = 7 [default = false];
+  // Whether to apply activation function to the depthwise 
+  // convolution within a SeparableConv2d
+  optional bool activate_depthwise = 8 [default = false];
+}
+
+message BatchNorm {
+  optional float decay = 1 [default = 0.999];
+  optional float epsilon = 4 [default = 0.001];
+  optional bool center = 2 [default = true];
+  optional bool scale = 3 [default = false];
+}
+
+message Regularizer {
+  oneof regularizer_oneof {
+    L1Regularizer l1_regularizer = 1;
+    L2Regularizer l2_regularizer = 2;
+  }
+}
+
+message Initializer {
+  oneof initializer_oneof {
+    TruncatedNormalInitializer truncated_normal_initializer = 1;
+    RandomNormalInitializer random_normal_initializer = 3;
+  }
+}
+
+message L1Regularizer {
+  optional float weight = 1 [default = 1.0];
+}
+
+message L2Regularizer {
+  optional float weight = 1 [default = 1.0];
+}
+
+message TruncatedNormalInitializer {
+  optional float mean = 1 [default = 0.0];
+  optional float stddev = 2 [default = 1.0];
+}
+
+message RandomNormalInitializer {
+  optional float mean = 1 [default = 0.0];
+  optional float stddev = 2 [default = 1.0];
+}

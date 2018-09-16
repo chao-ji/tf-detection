@@ -1,0 +1,70 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/image_resizer.proto";
+import "detection/protos/conv_hyperparams.proto";
+import "detection/protos/box_predictor.proto";
+import "detection/protos/anchor_generator.proto";
+import "detection/protos/target_assigner.proto";
+import "detection/protos/box_coder.proto";
+import "detection/protos/losses.proto";
+import "detection/protos/optimizer.proto";
+import "detection/protos/postprocessing.proto";
+
+
+message SsdModel {
+
+  message NormalizerRange {
+    optional float low = 1 [default = -1.0];
+
+    optional float high = 2 [default = 1.0];
+  }
+
+  optional ImageResizer image_resizer = 1;
+
+  optional NormalizerRange normalizer_range = 2;
+
+  optional ConvHyperparams conv_hyperparams = 11;
+
+  optional SsdFeatureExtractor feature_extractor = 3;
+
+  optional BoxPredictor box_predictor = 4;
+
+  optional AnchorGenerator anchor_generator = 5;
+
+  optional TargetAssigner target_assigner = 6;
+
+  optional BoxCoder box_coder = 7;
+
+  optional Loss loss = 8;
+
+  optional Optimizer optimizer = 9;
+
+  optional PostProcessing post_processing = 10; 
+
+  optional bool normalize_loss_by_num_matches = 14 [default = true];
+
+  optional bool normalize_loc_loss_by_code_size = 15 [default = false];
+
+  optional bool freeze_batch_norm = 16 [default = false];
+
+  optional bool add_background_class = 17 [default = true];
+
+}
+
+
+message SsdFeatureExtractor {
+  optional ConvHyperparams conv_hyperparams = 6;
+
+  optional string type = 1;
+
+  optional float depth_multiplier = 2;
+
+  optional bool reuse_weights = 3; 
+
+  optional bool use_depthwise = 4 [default = false];
+
+  optional bool override_base_feature_extractor_hyperparams = 5 [default = false];
+}
+

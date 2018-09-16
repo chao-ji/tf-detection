@@ -1,0 +1,12 @@
+syntax = "proto2";
+
+package detection.protos;
+
+message LabelMap {
+  message LabelMapItem {
+    optional int32 index = 1;
+    optional string label = 2;
+  }
+  repeated LabelMapItem label_map_item = 1;
+}
+

@@ -1,0 +1,24 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/conv_hyperparams.proto";
+
+message BoxPredictor {
+  oneof box_predictor_oneof {
+    ConvolutionalBoxPredictor convolutional_box_predictor = 1; 
+  }
+}
+
+message ConvolutionalBoxPredictor {
+
+  repeated int32 num_predictions = 2; 
+
+  optional ConvHyperparams conv_hyperparams = 3;
+
+  optional int32 kernel_size = 4 [default = 3];
+
+  optional int32 box_code_size = 5 [default = 4];
+
+  optional bool use_depthwise = 6 [default = false];
+}
