@@ -6,7 +6,8 @@ import "detection/protos/conv_hyperparams.proto";
 
 message BoxPredictor {
   oneof box_predictor_oneof {
-    ConvolutionalBoxPredictor convolutional_box_predictor = 1; 
+    ConvolutionalBoxPredictor convolutional_box_predictor = 1;
+    RcnnBoxPredictor rcnn_box_predictor = 2;
   }
 }
 
@@ -21,4 +22,11 @@ message ConvolutionalBoxPredictor {
   optional int32 box_code_size = 5 [default = 4];
 
   optional bool use_depthwise = 6 [default = false];
+}
+
+message RcnnBoxPredictor {
+
+  optional ConvHyperparams fc_hyperparams = 2;
+
+  optional int32 box_code_size = 3 [default = 4];
 }

@@ -1,43 +1,12 @@
-# Copyright 2017 The TensorFlow Authors. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""Base box coder.
-
-Box coders convert between coordinate frames, namely image-centric
-(with (0,0) on the top left of image) and anchor-centric (with (0,0) being
-defined by a specific anchor).
-
-Users of a BoxCoder can call two methods:
- encode: which encodes a box with respect to a given anchor
-  (or rather, a tensor of boxes wrt a corresponding tensor of anchors) and
- decode: which inverts this encoding with a decode operation.
-In both cases, the arguments are assumed to be in 1-1 correspondence already;
-it is not the job of a BoxCoder to perform matching.
-"""
 from abc import ABCMeta
 from abc import abstractmethod
 from abc import abstractproperty
 
 import tensorflow as tf
+from detection.utils import shape_utils
+from detection.core import box_list
 
-
-# Box coder types.
-FASTER_RCNN = 'faster_rcnn'
-KEYPOINT = 'keypoint'
-MEAN_STDDEV = 'mean_stddev'
-SQUARE = 'square'
+EPSILON = 1e-8
 
 
 class BoxCoder(object):
@@ -46,106 +15,199 @@ class BoxCoder(object):
 
   @abstractproperty
   def code_size(self):
-    """Return the size of each code.
+    """Return the size of each code, which is a constant integer specifying
+    the length of code.
 
-    This number is a constant and should agree with the output of the `encode`
-    op (e.g. if rel_codes is the output of self.encode(...), then it should have
-    shape [N, code_size()]).  This abstractproperty should be overridden by
-    implementations.
+    To be implemented by subclasses.
 
     Returns:
-      an integer constant
+      an int scalar.
     """
     pass
 
-  def encode(self, boxes, anchors):
-    """Encode a box list relative to an anchor collection.
+  def encode(self, boxlist, anchors):
+    """Encode a box list relative to an anchor list. Calls and wraps `_encode`
+    with a name scope.
 
     Args:
-      boxes: BoxList holding N boxes to be encoded
-      anchors: BoxList of N anchors
+      boxlist: a BoxList holding `num_boxes` boxes to be encoded.
+      anchors: a BoxList holding `num_boxes` anchors that `boxlist` are encoded 
+        relative to.
 
     Returns:
-      a tensor representing N relative-encoded boxes
+      rel_codes: a tensor of shape [num_boxes, code_size] where each row holds 
+        the anchor-encoded box coordinates.
     """
     with tf.name_scope('Encode'):
-      return self._encode(boxes, anchors)
+      return self._encode(boxlist, anchors)
 
   def decode(self, rel_codes, anchors):
-    """Decode boxes that are encoded relative to an anchor collection.
+    """Decode relative encoding of box coordinates back to coordinates.
+    Calls and wraps `self._decode` with a name scope.
 
     Args:
-      rel_codes: a tensor representing N relative-encoded boxes
-      anchors: BoxList of anchors
+      rel_codes: a tensor of shape [num_boxes, code_size] where each row holds 
+        the anchor-encoded box coordinates.
+      anchors: a BoxList holding `num_boxes` anchors that `rel_codes` are 
+        decoded relative to.
 
     Returns:
-      boxlist: BoxList holding N boxes encoded in the ordinary way (i.e.,
-        with corners y_min, x_min, y_max, x_max)
+      boxlist: a BoxList holding `num_boxes` boxes.
     """
     with tf.name_scope('Decode'):
       return self._decode(rel_codes, anchors)
 
   @abstractmethod
-  def _encode(self, boxes, anchors):
-    """Method to be overriden by implementations.
+  def _encode(self, boxlist, anchors):
+    """Encode a box list relative to an anchor list. 
+
+    To be implemented by subclasses.
 
     Args:
-      boxes: BoxList holding N boxes to be encoded
-      anchors: BoxList of N anchors
+      boxlist: a BoxList holding `num_boxes` boxes to be encoded.
+      anchors: a BoxList holding `num_boxes` anchors that `boxlist` are encoded 
+        relative to.
 
     Returns:
-      a tensor representing N relative-encoded boxes
+      rel_codes: a tensor of shape [num_boxes, code_size] where each row holds 
+        the anchor-encoded box coordinates.
     """
     pass
 
   @abstractmethod
   def _decode(self, rel_codes, anchors):
-    """Method to be overriden by implementations.
+    """Decode relative encoding of box coordinates back to coordinates.
+
+    To be implemented by subclasses.
 
     Args:
-      rel_codes: a tensor representing N relative-encoded boxes
-      anchors: BoxList of anchors
+      rel_codes: a tensor of shape [num_boxes, code_size] where each row holds 
+        the anchor-encoded box coordinates.
+      anchors: a BoxList holding `num_boxes` anchors that `rel_codes` are 
+        decoded relative to.
 
     Returns:
-      boxlist: BoxList holding N boxes encoded in the ordinary way (i.e.,
-        with corners y_min, x_min, y_max, x_max)
+      boxlist: a BoxList holding `num_boxes` boxes.
     """
     pass
 
 
-def batch_decode(encoded_boxes, box_coder, anchors):
-  """Decode a batch of encoded boxes.
+class FasterRcnnBoxCoder(BoxCoder):
+  """Faster RCNN Box Coder."""
 
-  This op takes a batch of encoded bounding boxes and transforms
-  them to a batch of bounding boxes specified by their corners in
-  the order of [y_min, x_min, y_max, x_max].
+  def __init__(self, scale_factors=None):
+    """Constructor.
+
+    Args:
+      scale_factors: list of 4 positive scalar floats, storing the 
+        factors by which the anchor-encoded prediction targets `ty`, `tx`, `th`
+        and `tw` are scaled. If None, no scaling is performed.
+    """
+    if scale_factors:
+      if len(scale_factors) != 4 or any(map(lambda f: f <= 0, scale_factors)):
+        raise ValueError('scale_factors must be a list of 4 positive numbers.')
+    self._scale_factors = scale_factors
+
+  @property
+  def code_size(self):
+    return 4
+
+  def _encode(self, boxlist, anchors):
+    """Encode a box list relative to an anchor list.
+
+    Args:
+      boxlist: a BoxList holding `num_boxes` boxes to be encoded.
+      anchors: a BoxList holding `num_boxes` anchors that `boxlist` are encoded 
+        relative to.
+
+    Returns:
+      rel_codes: a tensor of shape [num_boxes, 4] where each row holds the 
+        anchor-encoded box coordinates in ty, tx, th, tw format.
+    """
+    ycenter, xcenter, h, w = boxlist.get_center_coordinates_and_sizes()
+    ycenter_a, xcenter_a, ha, wa = anchors.get_center_coordinates_and_sizes()
+
+    ha += EPSILON
+    wa += EPSILON
+    h += EPSILON
+    w += EPSILON
+
+    ty = (ycenter - ycenter_a) / ha
+    tx = (xcenter - xcenter_a) / wa
+    th = tf.log(h / ha)
+    tw = tf.log(w / wa)
+
+    if self._scale_factors:
+      ty *= self._scale_factors[0]
+      tx *= self._scale_factors[1]
+      th *= self._scale_factors[2]
+      tw *= self._scale_factors[3]
+    rel_codes = tf.stack([ty, tx, th, tw], axis=1)
+    return rel_codes
+
+  def _decode(self, rel_codes, anchors):
+    """Decode relative encoding of box coordinates back to coordinates.
+
+    Args:
+      rel_codes: a tensor of shape [num_boxes, 4] where each row holds the 
+        anchor-encoded box coordinates in ty, tx, th, tw format.
+      anchors: a BoxList holding `num_boxes` anchors that `rel_codes` are 
+        decoded relative to.
+
+    Returns:
+      boxlist: a BoxList holding `num_boxes` boxes.
+    """
+    ycenter_a, xcenter_a, ha, wa = anchors.get_center_coordinates_and_sizes()
+
+    ty, tx, th, tw = tf.unstack(rel_codes, axis=1)
+    if self._scale_factors:
+      ty /= self._scale_factors[0]
+      tx /= self._scale_factors[1]
+      th /= self._scale_factors[2]
+      tw /= self._scale_factors[3]
+    ycenter = ty * ha + ycenter_a
+    xcenter = tx * wa + xcenter_a
+    h = tf.exp(th) * ha
+    w = tf.exp(tw) * wa
+    # convert box coordinates back to ymin, xmin, ymax, xmax format.
+    ymin = ycenter - h / 2.
+    xmin = xcenter - w / 2.
+    ymax = ycenter + h / 2.
+    xmax = xcenter + w / 2.
+    return box_list.BoxList(tf.stack([ymin, xmin, ymax, xmax], axis=1))
+
+
+def batch_decode(batch_box_encodings, anchor_boxlist_list, box_coder):
+  """Decode a batch of box encodings w.r.t. anchors to box coordinates.
 
   Args:
-    encoded_boxes: a float32 tensor of shape [batch_size, num_anchors,
-      code_size] representing the location of the objects.
-    box_coder: a BoxCoder object.
-    anchors: a BoxList of anchors used to encode `encoded_boxes`.
+    batch_box_encodings: a float tensor of shape 
+      [batch_size, num_anchors, num_classes, 4] holding box encoding 
+      predictions. 
+    anchors_boxlist_list: a list of BoxList instance holding float tensor
+      of shape [num_anchors, 4] as anchor box coordinates. Lenght is equal
+      to `batch_size`.
+    box_coder: a BoxCoder instance to decode anchor-encoded location predictions
+      into box coordinate predictions.
 
   Returns:
-    decoded_boxes: a float32 tensor of shape [batch_size, num_anchors,
-      coder_size] representing the corners of the objects in the order
-      of [y_min, x_min, y_max, x_max].
-
-  Raises:
-    ValueError: if batch sizes of the inputs are inconsistent, or if
-    the number of anchors inferred from encoded_boxes and anchors are
-    inconsistent.
+    decoded_boxes: a float tensor of shape 
+        [batch_size, num_anchors, num_classes, 4].
   """
-  encoded_boxes.get_shape().assert_has_rank(3)
-  if encoded_boxes.get_shape()[1].value != anchors.num_boxes_static():
-    raise ValueError('The number of anchors inferred from encoded_boxes'
-                     ' and anchors are inconsistent: shape[1] of encoded_boxes'
-                     ' %s should be equal to the number of anchors: %s.' %
-                     (encoded_boxes.get_shape()[1].value,
-                      anchors.num_boxes_static()))
+  shape = shape_utils.combined_static_and_dynamic_shape(batch_box_encodings)
 
-  decoded_boxes = tf.stack([
-      box_coder.decode(boxes, anchors).get()
-      for boxes in tf.unstack(encoded_boxes)
-  ])
+  box_encodings_list = [tf.reshape(box_encoding, [-1, box_coder.code_size]) 
+      for box_encoding in tf.unstack(batch_box_encodings, axis=0)]
+  # tile anchors in the 1st dimension to `shape[2]`(i.e. num of classes)
+  anchor_boxlist_list = [box_list.BoxList(
+      tf.reshape(tf.tile(tf.expand_dims(anchor_boxlist.get(), 1), 
+          [1, shape[2], 1]), [-1, box_coder.code_size])) 
+      for anchor_boxlist in anchor_boxlist_list]
+
+  decoded_boxes = []
+  for box_encodings, anchor_boxlist in zip(
+      box_encodings_list, anchor_boxlist_list):
+    decoded_boxes.append(box_coder.decode(box_encodings, anchor_boxlist).get())
+
+  decoded_boxes = tf.reshape(decoded_boxes, shape)
   return decoded_boxes

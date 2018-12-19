@@ -50,3 +50,24 @@ message ResizeImage {
   }
   optional Method method = 3 [default = BILINEAR];
 }
+
+
+message Normalizer {
+  enum Type {
+    RANGE = 1;
+    SUBTRACT_MEAN = 2;  
+  }
+
+  optional Type type = 1;
+
+  optional float low = 2 [default = -1.0];
+
+  optional float high = 3 [default = 1.0];
+
+  optional float r_mean = 4 [default = 123.68];
+
+  optional float g_mean = 5 [default = 116.779];
+
+  optional float b_mean = 6 [default = 103.939];
+}
+

@@ -53,6 +53,7 @@ message Regularizer {
 message Initializer {
   oneof initializer_oneof {
     TruncatedNormalInitializer truncated_normal_initializer = 1;
+    VarianceScalingInitializer variance_scaling_initializer = 2;
     RandomNormalInitializer random_normal_initializer = 3;
   }
 }
@@ -68,6 +69,12 @@ message L2Regularizer {
 message TruncatedNormalInitializer {
   optional float mean = 1 [default = 0.0];
   optional float stddev = 2 [default = 1.0];
+}
+
+message VarianceScalingInitializer {
+  optional float factor = 1 [default = 2.0];
+  optional bool uniform = 2 [default = false];
+  optional string mode = 3 [default = "FAN_IN"];
 }
 
 message RandomNormalInitializer {

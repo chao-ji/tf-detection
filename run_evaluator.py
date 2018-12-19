@@ -1,0 +1,125 @@
+r"""Executable for evaluating a detection model.
+
+Proto buffer (https://developers.google.com/protocol-buffers/) is used to manage 
+all configuration settings. The following configuration files are required:
+
+  'label_map.config' (the mapping from object class name to class index)
+  'model.config' (specifying the model architecture, e.g. ssd or faster rcnn)
+  'dataset.config' (how raw data should be read and preprocessed)
+  'test.config' (specifying evaluation, inference and visualization options.)
+
+See protos/label_map.proto, protos/ssd_model.proto, 
+protos/faster_rcnn_model.proto, protos/dataset.proto, protos/test_config.proto
+for details.
+
+Example:
+  python run_evaluator.py \
+    --label_map_config_path=faster_rcnn/pascal_label_map.config \
+    --model_config_path=faster_rcnn/faster_rcnn_model.config \
+    --dataset_config_path=faster_rcnn/dataset.config \
+    --test_config_path=faster_rcnn/test_config.config \
+    --model_arch=faster_rcnn_model
+"""
+import tensorflow as tf
+import numpy as np
+
+from detection.metrics import metrics_calculator
+from detection.builders import ssd_model_builder
+from detection.builders import faster_rcnn_model_builder
+from detection.utils import misc_utils
+
+#model_config_path = 'faster_rcnn/faster_rcnn_model.config'
+#dataset_config_path = 'faster_rcnn/dataset.config'
+#label_map_config_path = 'faster_rcnn/pascal_label_map.config'
+#test_config_path = 'faster_rcnn/test_config.config'
+#model_arch = 'faster_rcnn_model'
+
+SSD_LOSSES = 'loc_loss', 'cls_loss'
+FASTER_RCNN_LOSSES = ('rpn_loc_loss', 'rpn_cls_loss', 
+                      'frcnn_loc_loss', 'frcnn_cls_loss')
+
+flags = tf.app.flags
+
+flags.DEFINE_string(
+    'label_map_config_path', None, 'Path to the label map config file.')
+flags.DEFINE_string('model_config_path', None, 'Path to the model config file.')
+flags.DEFINE_string('dataset_config_path', None, 'Path to dataset config file.')
+flags.DEFINE_string('test_config_path', None, 'Path to the test config file.')
+flags.DEFINE_string('model_arch', None, 'Model architecture name.')
+
+FLAGS = flags.FLAGS
+
+
+def main(_):
+  label_map_config_path = FLAGS.label_map_config_path
+  model_config_path = FLAGS.model_config_path
+  dataset_config_path = FLAGS.dataset_config_path
+  test_config_path = FLAGS.test_config_path
+  model_arch = FLAGS.model_arch
+
+
+  label_map = misc_utils.read_label_map(label_map_config_path)
+  num_classes = len(label_map)
+
+  model_config = misc_utils.read_config(model_config_path, model_arch)
+  dataset_config = misc_utils.read_config(dataset_config_path, 'dataset')
+  test_config = misc_utils.read_config(test_config_path, 'test')
+
+  if model_arch == 'ssd_model':
+    model_evaluator, dataset = ssd_model_builder.build_ssd_evaluate_session(
+      model_config, dataset_config, num_classes)
+    losses_names = SSD_LOSSES
+  elif model_arch == 'faster_rcnn_model':
+    model_evaluator, dataset = (
+        faster_rcnn_model_builder.build_faster_rcnn_evaluate_session(
+            model_config, dataset_config, num_classes))
+    losses_names = FASTER_RCNN_LOSSES
+  else:
+    raise ValueError(
+        'model_arch must be either "ssd_model" or "faster_rcnn_model".') 
+
+  load_ckpt_path = test_config.load_ckpt_path
+  files = list(test_config.input_file)
+  
+  to_be_run_dict, losses_dict = model_evaluator.evaluate(files, dataset)
+
+  restore_saver = model_evaluator.create_restore_saver()
+
+  sess = tf.Session()
+
+  latest_checkpoint = tf.train.latest_checkpoint(load_ckpt_path)
+  restore_saver.restore(sess, latest_checkpoint)
+
+  if test_config.metrics_name == 'pascal_voc_detection_metrics':
+    met_calc = metrics_calculator.PascalVocMetricsCalculator(num_classes)
+  elif test_config.metrics_name == 'coco_detection_metrics':
+    categories = misc_utils.label_map_to_categories(label_map)
+    met_calc = metrics_calculator.MscocoMetricsCalculator(categories)
+
+  losses = []
+  while True:
+    try:
+      detection_result, losses_result = sess.run([to_be_run_dict, losses_dict])
+    except tf.errors.OutOfRangeError:
+      break;
+    losses.append([losses_result[k] for k in losses_names])
+    met_calc.update_per_image_result(detection_result,
+                                     detection_result['gt_boxes'],
+                                     detection_result['gt_labels'])
+  losses = np.array(losses)
+  sess.close()
+
+  misc_utils.print_evaluation_metrics(met_calc,
+                                      test_config.metrics_name,
+                                      losses,
+                                      losses_names, 
+                                      label_map)
+
+
+if __name__  == '__main__':
+  tf.flags.mark_flag_as_required('label_map_config_path')
+  tf.flags.mark_flag_as_required('model_config_path')
+  tf.flags.mark_flag_as_required('dataset_config_path')
+  tf.flags.mark_flag_as_required('test_config_path')
+  tf.flags.mark_flag_as_required('model_arch')
+  tf.app.run()

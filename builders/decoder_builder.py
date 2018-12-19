@@ -1,10 +1,13 @@
 import tensorflow as tf
 
 from detection.protos import decoder_pb2
-from detection.preprocess import data_decoder 
+from detection.data import data_decoder 
 
 
 def _get_feature_type_map():
+  """Returns a dict mapping from feature data type (enum) to tensorflow 
+  data type.
+  """
   feature_type_map = {
       decoder_pb2.KeysToFeaturesItem.STRING: tf.string,
       decoder_pb2.KeysToFeaturesItem.FLOAT32: tf.float32,
@@ -12,12 +15,23 @@ def _get_feature_type_map():
   }
   return feature_type_map
 
+
 def build(config):
+  """Builds data decoder.
+
+  Args:
+    config: a protobuf message storing DataDecoder configurations.
+
+  Returns:
+    an instance of DataDecoder.
+  """
+  if not isinstance(config, decoder_pb2.DataDecoder):
+    raise ValueError('config must be an instance of DataDecoder message.')
+
   keys_to_features = {}
   feature_type_map = _get_feature_type_map()
 
   for item in config.keys_to_features:
-
     if item.feature_parser.WhichOneof(
         'feature_parser_oneof') == 'fixed_len_feature_parser':
       dtype = item.feature_parser.fixed_len_feature_parser.type

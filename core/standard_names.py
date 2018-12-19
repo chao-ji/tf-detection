@@ -42,12 +42,12 @@ class ModeKeys(object):
 
 class PredTensorDictFields(object):
   box_encoding_predictions = 'box_encoding_predictions'
-  class_score_predictions = 'class_score_predictions'
+  class_predictions = 'class_predictions'
 
 
 class LossTensorDictFields(object):
-  localization_loss = 'localization_loss'
-  classification_loss = 'classification_loss' 
+  localization_loss = 'loc_loss'
+  classification_loss = 'cls_loss' 
 
 
 class DetTensorDictFields(object):

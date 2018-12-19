@@ -3,26 +3,56 @@ from detection.protos import losses_pb2
 
 
 def build(config):
-  classification_loss = _build_classification_loss(
-      config.classification_loss)
-  localization_loss = _build_localization_loss(
-      config.localization_loss)
+  """Builds localization loss, classification loss and optionally 
+  hard example miner.
 
-  classification_weight = config.classification_weight
-  localization_weight = config.localization_weight
+  Args:
+    config: a protobuf message storing Loss configurations.
+
+  Returns:
+    localization_loss_fn: a callable that computes localization loss.
+    classification_loss_fn: a callable that computes classification loss.
+    localization_loss_weight: float scalar, scales the contribution of 
+        localization loss relative to classification loss.
+    classification_loss_weight: float scalar, scales the contribution of
+        classification loss relative to localization loss.
+    hard_example_miner: a callable that performs hard example mining such
+        that gradient is backpropagated to high-loss anchorwise predictions.
+  """
+  if not isinstance(config, losses_pb2.Loss):
+    raise ValueError('config must be an instance of Loss message.')
+
+  localization_loss_fn = _build_localization_loss(
+      config.localization_loss)
+  classification_loss_fn = _build_classification_loss(
+      config.classification_loss)
+
+  localization_loss_weight = config.localization_weight
+  classification_loss_weight = config.classification_weight
 
   hard_example_miner = None
   if config.HasField('hard_example_miner'):
     hard_example_miner = build_hard_example_miner(
         config.hard_example_miner,
-        classification_weight,
-        localization_weight)
+        classification_loss_weight,
+        localization_loss_weight)
 
-  return (classification_loss, localization_loss, classification_weight,
-       localization_weight, hard_example_miner)
+  return (localization_loss_fn, classification_loss_fn, 
+      localization_loss_weight, classification_loss_weight, hard_example_miner)
 
 
 def _build_classification_loss(config):
+  """Builds classification loss.
+
+  Args:
+    config: a protobuf message storing ClassificationLoss configurations.
+
+  Returns:
+    an instance of ClassificationLoss.
+  """
+  if not isinstance(config, losses_pb2.ClassificationLoss):
+    raise ValueError('config must be an instance of ClassificationLoss '
+        'message.')
   loss_type = config.WhichOneof('classification_loss_oneof')
 
   if loss_type == 'weighted_sigmoid':
@@ -36,6 +66,16 @@ def _build_classification_loss(config):
 
 
 def _build_localization_loss(config):
+  """Builds localization loss.
+
+  Args:
+    config: a protobuf message storing LocalizationLoss configurations.
+
+  Returns:
+    an instance of LocalizationLoss.
+  """
+  if not isinstance(config, losses_pb2.LocalizationLoss):
+    raise ValueError('config must be an instance of LocalizationLoss message.')
   loss_type = config.WhichOneof('localization_loss_oneof')
 
   if loss_type == 'weighted_l2':
@@ -49,8 +89,21 @@ def _build_localization_loss(config):
 
 
 def build_hard_example_miner(config,
-                             classification_weight,
-                             localization_weight):
+                             localization_weight,
+                             classification_weight):
+  """Builds hard example miner.
+
+  Args:
+    config: a protobuf message storing HardExampleMiner configurations.
+    localization_weight: float scalar, localization loss weight.
+    classification_weight: float scalar, classification loss weight.
+
+  Returns:
+    an instance of HardExampleMiner.
+  """
+  if not isinstance(config, losses_pb2.HardExampleMiner):
+    raise ValueError('config must be an instance of HardExampleMinder message.')
+
   loss_type = None
   if config.loss_type == losses_pb2.HardExampleMiner.BOTH:
     loss_type = 'both'
@@ -74,3 +127,4 @@ def build_hard_example_miner(config,
       max_negatives_per_positive=max_negatives_per_positive,
       min_negatives_per_image=config.min_negatives_per_image)
   return hard_example_miner
+

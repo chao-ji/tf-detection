@@ -9,21 +9,14 @@ import "detection/protos/anchor_generator.proto";
 import "detection/protos/target_assigner.proto";
 import "detection/protos/box_coder.proto";
 import "detection/protos/losses.proto";
-import "detection/protos/optimizer.proto";
 import "detection/protos/postprocessing.proto";
-
+import "detection/protos/preprocessor.proto";
 
 message SsdModel {
 
-  message NormalizerRange {
-    optional float low = 1 [default = -1.0];
-
-    optional float high = 2 [default = 1.0];
-  }
-
   optional ImageResizer image_resizer = 1;
 
-  optional NormalizerRange normalizer_range = 2;
+  optional Normalizer normalizer = 2;
 
   optional ConvHyperparams conv_hyperparams = 11;
 
@@ -38,8 +31,6 @@ message SsdModel {
   optional BoxCoder box_coder = 7;
 
   optional Loss loss = 8;
-
-  optional Optimizer optimizer = 9;
 
   optional PostProcessing post_processing = 10; 
 

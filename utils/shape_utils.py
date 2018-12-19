@@ -1,19 +1,3 @@
-# Copyright 2017 The TensorFlow Authors. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""Utils used to manipulate tensor shapes."""
 
 import tensorflow as tf
 
@@ -46,30 +30,28 @@ def _set_dim_0(t, d0):
   return t
 
 
-def pad_tensor(t, length):
-  """Pads the input tensor with 0s along the first dimension up to the length.
+def pad_tensor(tensor, size):
+  """Pad input tensor with zeors along the 0th dimension up to the `size`.
+    
+  `size` must be `>= shape(tensor)[0]`.
 
   Args:
-    t: the input tensor, assuming the rank is at least 1.
-    length: a tensor of shape [1]  or an integer, indicating the first dimension
-      of the input tensor t after padding, assuming length <= t.shape[0].
+    tensor: input tensor with rank >= 1.
+    size: int scalar or int scalar tensor, the desired size of 0th dimension
+      of the padded tensor.
 
   Returns:
-    padded_t: the padded tensor, whose first dimension is length. If the length
-      is an integer, the first dimension of padded_t is set to length
-      statically.
+    padded: tensor of shape [size, ...], the padded tensor.  
   """
-  t_rank = tf.rank(t)
-  t_shape = tf.shape(t)
-  t_d0 = t_shape[0]
-  pad_d0 = tf.expand_dims(length - t_d0, 0)
-  pad_shape = tf.cond(
-      tf.greater(t_rank, 1), lambda: tf.concat([pad_d0, t_shape[1:]], 0),
-      lambda: tf.expand_dims(length - t_d0, 0))
-  padded_t = tf.concat([t, tf.zeros(pad_shape, dtype=t.dtype)], 0)
-  if not _is_tensor(length):
-    padded_t = _set_dim_0(padded_t, length)
-  return padded_t
+  shape = tf.shape(tensor)
+  pad_shape_dim0 = tf.expand_dims(size - shape[0], 0)
+  pad_shape = tf.cond(tf.greater(tf.rank(tensor), 1), 
+      lambda: tf.concat([pad_shape_dim0, shape[1:]], 0),
+      lambda: pad_shape_dim0)
+  padded = tf.concat([tensor, tf.zeros(pad_shape, dtype=tensor.dtype)], 0)
+  if not _is_tensor(size):
+    padded = _set_dim_0(padded, size)
+  return padded
 
 
 def clip_tensor(t, length):
@@ -136,133 +118,26 @@ def combined_static_and_dynamic_shape(tensor):
   return combined_shape
 
 
-def static_or_dynamic_map_fn(fn, elems, dtype=None,
-                             parallel_iterations=32, back_prop=True):
+def static_map_fn(fn, elems):
   """Runs map_fn as a (static) for loop when possible.
+  """
+  elems = [tf.unstack(elem) for elem in elems]
+  arg_tuples = list(zip(*elems))
+  outputs = [fn(arg_tuple) for arg_tuple in arg_tuples]
+  stacked_outputs = [tf.stack(output_tuple) for output_tuple in zip(*outputs)]
+  return stacked_outputs if len(stacked_outputs) > 1 else stacked_outputs[0]
 
-  This function rewrites the map_fn as an explicit unstack input -> for loop
-  over function calls -> stack result combination.  This allows our graphs to
-  be acyclic when the batch size is static.
-  For comparison, see https://www.tensorflow.org/api_docs/python/tf/map_fn.
 
-  Note that `static_or_dynamic_map_fn` currently is not *fully* interchangeable
-  with the default tf.map_fn function as it does not accept nested inputs (only
-  Tensors or lists of Tensors).  Likewise, the output of `fn` can only be a
-  Tensor or list of Tensors.
+def get_feature_map_spatial_dims(feature_map_list):
+  """Get feature map spatial dimensions of a list of feature map tensors.
 
-  TODO(jonathanhuang): make this function fully interchangeable with tf.map_fn.
-
-  Args:
-    fn: The callable to be performed. It accepts one argument, which will have
-      the same structure as elems. Its output must have the
-      same structure as elems.
-    elems: A tensor or list of tensors, each of which will
-      be unpacked along their first dimension. The sequence of the
-      resulting slices will be applied to fn.
-    dtype:  (optional) The output type(s) of fn. If fn returns a structure of
-      Tensors differing from the structure of elems, then dtype is not optional
-      and must have the same structure as the output of fn.
-    parallel_iterations: (optional) number of batch items to process in
-      parallel.  This flag is only used if the native tf.map_fn is used
-      and defaults to 32 instead of 10 (unlike the standard tf.map_fn default).
-    back_prop: (optional) True enables support for back propagation.
-      This flag is only used if the native tf.map_fn is used.
+  Args: 
+    feature_map_list: a list of feature map tensors of shape 
+      [batch_size, height, width, channels]
 
   Returns:
-    A tensor or sequence of tensors. Each tensor packs the
-    results of applying fn to tensors unpacked from elems along the first
-    dimension, from first to last.
-  Raises:
-    ValueError: if `elems` a Tensor or a list of Tensors.
-    ValueError: if `fn` does not return a Tensor or list of Tensors
+    a list of int 2-tuples containing (height, width).
   """
-  if isinstance(elems, list):
-    for elem in elems:
-      if not isinstance(elem, tf.Tensor):
-        raise ValueError('`elems` must be a Tensor or list of Tensors.')
-
-    elem_shapes = [elem.shape.as_list() for elem in elems]
-    # Fall back on tf.map_fn if shapes of each entry of `elems` are None or fail
-    # to all be the same size along the batch dimension.
-    for elem_shape in elem_shapes:
-      if (not elem_shape or not elem_shape[0]
-          or elem_shape[0] != elem_shapes[0][0]):
-        return tf.map_fn(fn, elems, dtype, parallel_iterations, back_prop)
-    arg_tuples = zip(*[tf.unstack(elem) for elem in elems])
-    outputs = [fn(arg_tuple) for arg_tuple in arg_tuples]
-  else:
-    if not isinstance(elems, tf.Tensor):
-      raise ValueError('`elems` must be a Tensor or list of Tensors.')
-    elems_shape = elems.shape.as_list()
-    if not elems_shape or not elems_shape[0]:
-      return tf.map_fn(fn, elems, dtype, parallel_iterations, back_prop)
-    outputs = [fn(arg) for arg in tf.unstack(elems)]
-  # Stack `outputs`, which is a list of Tensors or list of lists of Tensors
-  if all([isinstance(output, tf.Tensor) for output in outputs]):
-    return tf.stack(outputs)
-  else:
-    if all([isinstance(output, list) for output in outputs]):
-      if all([all(
-          [isinstance(entry, tf.Tensor) for entry in output_list])
-              for output_list in outputs]):
-        return [tf.stack(output_tuple) for output_tuple in zip(*outputs)]
-  raise ValueError('`fn` should return a Tensor or a list of Tensors.')
-
-
-def assert_shape_equal(shape_a, shape_b):
-  """Asserts that shape_a and shape_b are equal.
-
-  If the shapes are static, raises a ValueError when the shapes
-  mismatch.
-
-  If the shapes are dynamic, raises a tf InvalidArgumentError when the shapes
-  mismatch.
-
-  Args:
-    shape_a: a list containing shape of the first tensor.
-    shape_b: a list containing shape of the second tensor.
-
-  Returns:
-    Either a tf.no_op() when shapes are all static and a tf.assert_equal() op
-    when the shapes are dynamic.
-
-  Raises:
-    ValueError: When shapes are both static and unequal.
-  """
-  if (all(isinstance(dim, int) for dim in shape_a) and
-      all(isinstance(dim, int) for dim in shape_b)):
-    if shape_a != shape_b:
-      raise ValueError('Unequal shapes {}, {}'.format(shape_a, shape_b))
-    else: return tf.no_op()
-  else:
-    return tf.assert_equal(shape_a, shape_b)
-
-
-def assert_shape_equal_along_first_dimension(shape_a, shape_b):
-  """Asserts that shape_a and shape_b are the same along the 0th-dimension.
-
-  If the shapes are static, raises a ValueError when the shapes
-  mismatch.
-
-  If the shapes are dynamic, raises a tf InvalidArgumentError when the shapes
-  mismatch.
-
-  Args:
-    shape_a: a list containing shape of the first tensor.
-    shape_b: a list containing shape of the second tensor.
-
-  Returns:
-    Either a tf.no_op() when shapes are all static and a tf.assert_equal() op
-    when the shapes are dynamic.
-
-  Raises:
-    ValueError: When shapes are both static and unequal.
-  """
-  if isinstance(shape_a[0], int) and isinstance(shape_b[0], int):
-    if shape_a[0] != shape_b[0]:
-      raise ValueError('Unequal first dimension {}, {}'.format(
-          shape_a[0], shape_b[0]))
-    else: return tf.no_op()
-  else:
-    return tf.assert_equal(shape_a[0], shape_b[0])
-
+  feature_map_shape_list = [tuple(combined_static_and_dynamic_shape(
+      feature_map)[1:3]) for feature_map in feature_map_list]
+  return feature_map_shape_list

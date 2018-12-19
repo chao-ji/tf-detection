@@ -1,0 +1,26 @@
+syntax = "proto2";
+
+package detection.protos;
+
+
+message TestConfig {
+  optional string metrics_name = 1 [default = 'pascal_voc_detection_metrics'];
+
+  optional float score_thresh = 2 [default = 0.5];
+
+  optional int32 line_width = 3 [default = 1];
+
+  optional int32 font_size = 4 [default = 10];
+
+  optional string font_path = 5;
+
+  optional int32 max_num_viz = 6;
+
+  repeated string input_file = 7;
+
+  optional string load_ckpt_path = 8;
+
+  optional string inference_directory = 9;
+
+  repeated string image_file_extension = 10;
+}

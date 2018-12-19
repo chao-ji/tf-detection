@@ -1,0 +1,75 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/preprocessor.proto";
+import "detection/protos/conv_hyperparams.proto";
+import "detection/protos/box_coder.proto";
+import "detection/protos/target_assigner.proto";
+import "detection/protos/losses.proto";
+import "detection/protos/box_predictor.proto";
+import "detection/protos/anchor_generator.proto";
+import "detection/protos/image_resizer.proto";
+import "detection/protos/postprocessing.proto";
+
+
+message FasterRcnnModel {
+
+  optional ImageResizer image_resizer = 1;
+
+  optional Normalizer normalizer = 2;
+
+  optional FasterRcnnFeatureExtractor feature_extractor = 3;
+
+  optional BoxCoder box_coder = 4;
+
+  optional AnchorGenerator rpn_anchor_generator = 5; 
+
+  optional BoxPredictor rpn_box_predictor = 6; 
+
+  optional BoxPredictor frcnn_box_predictor = 7;
+
+  optional TargetAssigner rpn_target_assigner = 8;
+
+  optional TargetAssigner frcnn_target_assigner = 9;
+
+  optional Loss rpn_loss = 10;
+
+  optional Loss frcnn_loss = 11;
+
+  optional PostProcessing rpn_post_processing = 12; 
+  
+  optional PostProcessing frcnn_post_processing = 13;
+
+  optional int32 rpn_box_predictor_depth = 14 [default = 512];
+
+  optional float rpn_minibatch_positive_fraction = 15 [default = 0.5];
+
+  optional float frcnn_minibatch_positive_fraction = 16 [default = 0.25];
+
+  optional int32 rpn_minibatch_size = 17 [default = 256];
+
+  optional int32 frcnn_minibatch_size = 18 [default = 64];
+
+  optional int32 proposal_crop_size = 19 [default = 14];
+
+  optional bool freeze_batch_norm = 20 [default = true];
+}
+
+
+message FasterRcnnFeatureExtractor {
+
+  optional string type = 1; 
+
+  optional BatchNorm batch_norm_params = 2;
+
+  optional float depth_multiplier = 3 [default = 1.0];
+
+  optional float reuse_weights = 4;
+
+  optional int32 resnet_num_layers = 5;
+
+  optional int32 output_stride = 6 [default = 16];
+
+  optional float weight_decay = 7 [default = 0.0];
+}

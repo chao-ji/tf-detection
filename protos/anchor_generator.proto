@@ -4,6 +4,7 @@ package detection.protos;
 
 message AnchorGenerator {
   oneof anchor_generator_oneof {
+    GridAnchorGenerator grid_anchor_generator = 1;
     SSDAnchorGenerator ssd_anchor_generator = 2;
   }
 }
@@ -34,4 +35,23 @@ message SSDAnchorGenerator {
   repeated int32 height_offset = 10;
 
   repeated int32 width_offset = 11;
+}
+
+
+message GridAnchorGenerator {
+  optional int32 height = 1 [default = 256];
+
+  optional int32 width = 2 [default = 256];
+
+  optional int32 height_stride = 3 [default = 16];
+
+  optional int32 width_stride = 4 [default = 16];
+
+  optional int32 height_offset = 5 [default = 0];
+
+  optional int32 width_offset = 6 [default = 0];
+
+  repeated float scale_list = 7;
+
+  repeated float aspect_ratio_list = 8;
 }

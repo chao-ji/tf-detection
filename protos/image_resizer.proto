@@ -4,6 +4,7 @@ package detection.protos;
 
 message ImageResizer {
   oneof image_resizer_oneof {
+    KeepAspectRatioResizer keep_aspect_ratio_resizer = 1;
     FixedShapeResizer fixed_shape_resizer = 2;
   }
 }
@@ -22,3 +23,12 @@ message FixedShapeResizer {
 
   optional ResizeType resize_method = 3 [default = BILINEAR];
 }
+
+message KeepAspectRatioResizer {
+  optional int32 min_dimension = 1 [default = 600];
+
+  optional int32 max_dimension = 2 [default = 1024]; 
+
+  optional ResizeType resize_method = 3 [default = BILINEAR];
+}
+
