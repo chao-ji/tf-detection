@@ -60,6 +60,7 @@ which generates `*_pb2.py` files in the `protos` directory.
 
 ##### Faster RCNN
 mean Average Precisions = 0.7772
+
 |-|plane|bike|bird|boat|bottle|bus|car|cat|chair|cow|table|dog|horse|mbike|person|plant|sheep|sofa|train|tvmonitor|
 |-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|-|
 AP|0.8095|0.8508|0.8202|0.6911|0.6144|0.8631|0.8818|0.9181|0.5212|0.8156|0.6111|0.9122|0.9036|0.8273|0.8531|0.4848|0.8275|0.7391|0.8552|0.7441|
