@@ -12,6 +12,8 @@ from detection.builders.preprocessor_builder import build_normalizer_fn
 
 from detection.feature_extractors.ssd_inception_v2 import (
     SsdInceptionV2FeatureExtractor)
+from detection.feature_extractors.ssd_mobilenet_v2 import (
+    SsdMobileNetV2FeatureExtractor)
 
 from detection.ssd import trainer
 from detection.ssd import evaluator
@@ -71,8 +73,8 @@ def build_ssd_train_session(model_config,
    localization_loss_weight, classification_loss_weight,
    hard_example_miner) = losses_builder.build(model_config.loss)
 
-  normalize_loss_by_num_matches = model_config.normalize_loss_by_num_matches
-  normalize_loc_loss_by_code_size = model_config.normalize_loc_loss_by_code_size
+#  normalize_loss_by_num_matches = model_config.normalize_loss_by_num_matches
+#  normalize_loc_loss_by_code_size = model_config.normalize_loc_loss_by_code_size
   freeze_batch_norm = model_config.freeze_batch_norm
   add_background_class = model_config.add_background_class
   gradient_clipping_by_norm = train_config.gradient_clipping_by_norm
@@ -94,8 +96,8 @@ def build_ssd_train_session(model_config,
 
       localization_loss_weight=localization_loss_weight,
       classification_loss_weight=classification_loss_weight,
-      normalize_loss_by_num_matches=normalize_loss_by_num_matches,
-      normalize_loc_loss_by_codesize=normalize_loc_loss_by_code_size,
+#      normalize_loss_by_num_matches=normalize_loss_by_num_matches,
+#      normalize_loc_loss_by_codesize=normalize_loc_loss_by_code_size,
       freeze_batch_norm=freeze_batch_norm,
       add_background_class=add_background_class,
       gradient_clipping_by_norm=gradient_clipping_by_norm)
@@ -149,8 +151,8 @@ def build_ssd_evaluate_session(model_config,
   non_max_suppression_fn, score_converter_fn = postprocessing_builder.build(
       model_config.post_processing)
 
-  normalize_loss_by_num_matches = model_config.normalize_loss_by_num_matches
-  normalize_loc_loss_by_code_size = model_config.normalize_loc_loss_by_code_size
+#  normalize_loss_by_num_matches = model_config.normalize_loss_by_num_matches
+#  normalize_loc_loss_by_code_size = model_config.normalize_loc_loss_by_code_size
   add_background_class = model_config.add_background_class
 
   # ssd model
@@ -172,8 +174,8 @@ def build_ssd_evaluate_session(model_config,
 
       localization_loss_weight=localization_loss_weight,
       classification_loss_weight=classification_loss_weight,
-      normalize_loss_by_num_matches=normalize_loss_by_num_matches,
-      normalize_loc_loss_by_codesize=normalize_loc_loss_by_code_size,
+#      normalize_loss_by_num_matches=normalize_loss_by_num_matches,
+#      normalize_loc_loss_by_codesize=normalize_loc_loss_by_code_size,
       add_background_class=add_background_class)
   # dataset
   dataset = dataset_builder.build(dataset_config, ModeKeys.eval, num_classes)
@@ -258,11 +260,16 @@ def build_feature_extractor(config, conv_hyperparams_fn=None):
         conv_hyperparams_fn=conv_hyperparams_fn,
         depth_multiplier=config.depth_multiplier,
         reuse_weights=None,
-        use_depthwise=config.use_depthwise,
-        override_base_feature_extractor_hyperparams=
-            config.override_base_feature_extractor_hyperparams)
+        use_depthwise=config.use_depthwise)
     return feature_extractor
-  else:
+  elif config.type == 'ssd_mobilenet_v2':
+    feature_extractor = SsdMobileNetV2FeatureExtractor(
+        conv_hyperparams_fn=conv_hyperparams_fn,
+        depth_multiplier=config.depth_multiplier,
+        reuse_weights=None,
+        use_depthwise=config.use_depthwise)
+    return feature_extractor
+  else:    
     pass
   
   raise ValueError('Unknown feature extractor.')

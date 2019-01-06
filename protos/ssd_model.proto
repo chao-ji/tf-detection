@@ -34,9 +34,9 @@ message SsdModel {
 
   optional PostProcessing post_processing = 10; 
 
-  optional bool normalize_loss_by_num_matches = 14 [default = true];
+//  optional bool normalize_loss_by_num_matches = 14 [default = true];
 
-  optional bool normalize_loc_loss_by_code_size = 15 [default = false];
+//  optional bool normalize_loc_loss_by_code_size = 15 [default = false];
 
   optional bool freeze_batch_norm = 16 [default = false];
 
@@ -55,7 +55,5 @@ message SsdFeatureExtractor {
   optional bool reuse_weights = 3; 
 
   optional bool use_depthwise = 4 [default = false];
-
-  optional bool override_base_feature_extractor_hyperparams = 5 [default = false];
 }
 

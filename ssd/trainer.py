@@ -12,6 +12,7 @@ from detection.utils import variables_utils as var_utils
 from detection.utils import misc_utils
 from detection.utils import ops
 
+
 class SsdModelTrainer(detection_model.DetectionModel):
   """Trains a SSD detection model.
   """
@@ -31,8 +32,6 @@ class SsdModelTrainer(detection_model.DetectionModel):
 
                localization_loss_weight,
                classification_loss_weight,
-               normalize_loss_by_num_matches,
-               normalize_loc_loss_by_codesize,
                freeze_batch_norm,
                add_background_class,
 
@@ -59,10 +58,6 @@ class SsdModelTrainer(detection_model.DetectionModel):
         localization loss relative to classification loss.
       classification_loss_weight: float scalar, scales the contribution of
         classification loss relative to localization loss.
-      normalize_loss_by_num_matches: bool scalar, whether to normalize both
-        types of losses by num of matches.    
-      normalize_loc_loss_by_codesize: bool scalar, whether to normalize 
-        localization loss by box code size (e.g. 4 for the default box coder.)
       freeze_batch_norm: bool scalar, whether to run batch-norm layer in test 
         mode or training mode. Defaults to True (i.e. test mode). 
       add_background_class: bool scalar, whether to add background class. 
@@ -86,8 +81,6 @@ class SsdModelTrainer(detection_model.DetectionModel):
 
     self._localization_loss_weight = localization_loss_weight
     self._classification_loss_weight = classification_loss_weight
-    self._normalize_loss_by_num_matches = normalize_loss_by_num_matches
-    self._normalize_loc_loss_by_codesize = normalize_loc_loss_by_codesize 
     self._freeze_batch_norm = freeze_batch_norm
     self._add_background_class = add_background_class
 
@@ -170,18 +163,22 @@ class SsdModelTrainer(detection_model.DetectionModel):
     grouped_update_op = ops.create_gradient_update_op(optimizer,
         total_loss, global_step, self._gradient_clipping_by_norm)
 
-    return grouped_update_op, total_loss, global_step
+    total_loss = tf.check_numerics(total_loss, 'Loss Tensor is inf or nan.')
+    with tf.control_dependencies([grouped_update_op]):
+      total_loss = tf.identity(total_loss)
 
-  def _get_vars_map(self,
-                    fine_tune_checkpoint_type='classification',
+    return total_loss, global_step
+
+  def _get_vars_map(self, 
+                    checkpoint_type='classification',
                     load_all_detection_checkpoint_vars=False):
     """Returns a mapping from var name to var tensor for restoring variables 
     from a checkpoint.
 
     Args:
-      fine_tune_checkpoint_type: a string scalar, type of checkpoint from which
+      checkpoint_type: a string scalar, type of checkpoint from which
         to initialize variables. 'classification' for a pretrained 
-        classification model (e.g. Inception, ResNet), 'detection' for a 
+        classification model (e.g. Inception, ResNet); 'detection' for a 
         pretrained detection model.
       load_all_detection_checkpoint_vars: a bool scalar, whether to load all
         detection checkpoint variables.
@@ -189,45 +186,47 @@ class SsdModelTrainer(detection_model.DetectionModel):
     Returns:
       a dict mapping from variable names to variable tensors.
     """
-    vars_to_restore = {}
+    name_to_var_map = {}
+
     for var in tf.global_variables():
       var_name = var.op.name
-      if (fine_tune_checkpoint_type == 'detection' and
-          load_all_detection_checkpoint_vars):
-        vars_to_restore[var_name] = var
+      if checkpoint_type == 'detection' and load_all_detection_checkpoint_vars:
+        name_to_var_map[var_name] = var
       else:
         if var_name.startswith(self.extract_features_scope):
-          if fine_tune_checkpoint_type == 'classification':
-            var_name = (
-                re.split('^' + self.extract_features_scope + '/',
-                         var_name)[-1])
-          vars_to_restore[var_name] = var
-    return vars_to_restore
+          if checkpoint_type == 'classification':
+            var_name = re.split('^' + self.extract_features_scope + '/',
+              var_name)[-1]
+          name_to_var_map[var_name] = var
 
+    return name_to_var_map
 
   def create_restore_saver(self,
                            load_ckpt_path,
-                           fine_tune_checkpoint_type='classification',
-                           load_all_detection_checkpoint_vars=False):
+                           checkpoint_type='classification',
+                           load_all_detection_checkpoint_vars=False,
+                           include_global_step=True):
     """Creates restore saver for restoring variables from a checkpoint.
       
     Args:
       load_ckpt_path: a string scalar, pointing to a checkpoint file ('*.ckpt').
-      fine_tune_checkpoint_type: a string scalar, type of checkpoint from which
+      checkpoint_type: a string scalar, type of checkpoint from which
         to initialize variables. 'classification' for a pretrained 
         classification model (e.g. Inception, ResNet), 'detection' for a 
         pretrained detection model.
       load_all_detection_checkpoint_vars: a bool scalar, whether to load all
         detection checkpoint variables.
-      
+      include_global_step: bool scalar, whether to restore global step in the
+        checkpoint.
+
     Returns:
       restore_saver: a tf.train.Saver instance.
     """
-    vars_map = self._get_vars_map(fine_tune_checkpoint_type,
-                                  load_all_detection_checkpoint_vars) 
+    vars_map = self._get_vars_map(checkpoint_type, 
+                                  load_all_detection_checkpoint_vars)
 
     available_vars_map = var_utils.get_vars_available_in_ckpt(
-        vars_map, load_ckpt_path, include_global_step=False)
+        vars_map, load_ckpt_path, include_global_step=include_global_step)
 
     restore_saver = tf.train.Saver(available_vars_map)
     return restore_saver

@@ -32,13 +32,18 @@ def print_evaluation_metrics(
       'frcnn_loc_loss', 'frcnn_cls_loss' for Faster RCNN). 
     label_map: a dict mapping from int (class index) to string (class name).
   """
+  class_indices = list(label_map.keys())
+
   if metrics_name == 'pascal_voc_detection_metrics':
     num_classes = metrics_calculator.num_classes
     APs = metrics_calculator.calculate_metrics()
-    print('PascalBoxes_Precision/mAP@0.5IOU {}'.format(np.nanmean(APs)))
-    for i in range(1, num_classes + 1):
+    print('PascalBoxes_Precision/mAP@0.5IOU {}'.format(
+        np.mean(list(APs.values()))))
+    for i in range(num_classes):
+      if i + 1 not in class_indices:
+        continue
       print('PascalBoxes_PerformanceByCategory/AP@0.5IOU/{} {}'.format(
-          label_map[i], APs[i - 1]))
+          label_map[i + 1], APs[i + 1]))
   elif metrics_name == 'coco_detection_metrics':
     metrics = metrics_calculator.calculate_metrics()
     print()
@@ -117,13 +122,15 @@ def read_label_map(label_map_config_file):
   Returns:
     label_map: a dict mapping from class index (int scalar starting from 1 up 
       to total num of classes) to class label (string scalar).
+    num_classes: int scalar, num of classes.
   """
   label_map_config = label_map_pb2.LabelMap()
   text_format.Merge(open(label_map_config_file).read(), label_map_config)
   label_map = dict([(item.index, item.label) 
       for item in label_map_config.label_map_item])
-  _check_label_map(label_map)
-  return label_map
+  num_classes = label_map_config.num_classes
+#  _check_label_map(label_map)
+  return label_map, num_classes
 
 
 def _check_label_map(label_map):
@@ -250,6 +257,7 @@ def process_per_image_detection(image_list,
     gt_boxlist = gt_boxlist_list[0]
     gt_boxes = box_list_ops.to_absolute_coordinates(
       gt_boxlist, height, width).get() 
+
     gt_labels = tf.argmax(
         gt_boxlist.get_field('labels'), axis=1, output_type=tf.int32)
     to_be_run_tensor_dict['gt_boxes'] = gt_boxes

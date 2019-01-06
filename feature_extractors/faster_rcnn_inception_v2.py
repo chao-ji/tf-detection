@@ -17,7 +17,8 @@ class FasterRcnnInceptionV2FeatureExtractor(
     """Constructor.
 
     Args:
-      batch_norm_params:
+      batch_norm_params: a dict mapping from strings to floats, holind the 
+        parameters for batch normalization (i.e. epsilon, decay, center, scale).
       depth_multiplier: float scalar, float multiplier for the depth (num
         of channels) for all convolution ops. The value must be greater than
         zero. Typical usage will be to set this value in (0, 1) to reduce the

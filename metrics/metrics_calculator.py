@@ -4,8 +4,8 @@ from abc import abstractmethod
 import numpy as np
 
 from detection.metrics import np_box_ops
-from detection.metrics import utils 
-from detection.metrics import coco_utils
+from detection.metrics import coco_helpers
+from detection.utils import metrics_utils as utils
 
 
 class DetectionMetricsCalculator(object):
@@ -35,13 +35,15 @@ class DetectionMetricsCalculator(object):
 class PascalVocMetricsCalculator(DetectionMetricsCalculator):
   """Computes PASCAL VOC object detection metrics (mean Average Precision).
   """
-  def __init__(self, num_classes):
+  def __init__(self, num_classes, class_indices):
     """Constructor.
 
     Args:
       num_classes: int scalar, num of classes.
+      class_indices: list of ints, the class indices starting at 1.
     """
     self._num_classes = num_classes
+    self._class_indices = class_indices
     self._scores = [[] for _ in range(num_classes)]
     self._tp_fp_labels = [[] for _ in range(num_classes)]
     self._num_gt_instances = np.zeros(num_classes, dtype=float)
@@ -76,6 +78,8 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
     tp_fp_labels = [[] for _ in range(self._num_classes)]
     
     for i in range(self._num_classes):
+      if i + 1 not in self._class_indices:
+        continue
       det_indices = (detection_dict['classes'] - 1 == i)
       gt_indices = gt_labels == i
       scores[i] = detection_dict['scores'][det_indices]
@@ -108,6 +112,8 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
       tp_fp_labels[i] = tp_fp_labels[i].astype(float)
 
     for i in range(self._num_classes):
+      if i + 1 not in self._class_indices:
+        continue
       if scores[i].shape[0] > 0:
         self._scores[i] = np.concatenate(
             [self._scores[i], scores[i]])
@@ -118,19 +124,20 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
     """Calculates object detection metrics.
 
     Returns:
-      average_precisions: list of floats of length `num_classes`.
+      average_precisions: list of floats, holding average precision per class.
     """
-    average_precisions = []
+    average_precisions = {} 
     for i in range(self._num_classes):
-#      if self._num_gt_instances[i] == 0:
-#        print('class', i)
-#        continue
+      if i + 1 not in self._class_indices:
+        continue
+
       scores = self._scores[i]
       tp_fp_labels = self._tp_fp_labels[i]
       precision, recall = utils.compute_precision_recall(
           scores, tp_fp_labels, self._num_gt_instances[i])
       average_precision = utils.compute_average_precision(precision, recall)
-      average_precisions.append(average_precision)
+
+      average_precisions[i + 1] = average_precision
     return average_precisions
 
 
@@ -139,6 +146,7 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
   """
   def __init__(self, 
                categories, 
+               class_indices,
                include_metrics_per_category=False, 
                all_metrics_per_category=False):
     """Constructor.
@@ -146,10 +154,12 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
     Args:
       categories: a list of dict, each having two entries 'id' and 'name'.
         e.g., [{'id': 1, 'name': 'label_1'}, {'id': 2, 'name': 'label_2'}, ...]
+      class_indices: list of ints, the class indices starting at 1.
       include_metrics_per_category: bool scalar.
       all_metrics_per_category: bool scalar.
     """
     self._categories = categories
+    self._class_indices = class_indices
     self._include_metrics_per_category = include_metrics_per_category
     self._all_metrics_per_category = all_metrics_per_category
 
@@ -178,8 +188,13 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
     Returns:
       None
     """
+    valid_indices = [i in self._class_indices for i in detection_dict['classes']]
+    detection_dict['boxes'] = detection_dict['boxes'][valid_indices]
+    detection_dict['classes'] = detection_dict['classes'][valid_indices]
+    detection_dict['scores'] = detection_dict['scores'][valid_indices]
+
     # groundtruth
-    self._groundtruth_list.extend(coco_utils.convert_groundtruth_to_coco_format(
+    self._groundtruth_list.extend(coco_helpers.convert_groundtruth_to_coco_format(
       image_id=self._image_id,
       next_annotation_id=self._annotation_id,
       category_id_set=self._category_id_set,
@@ -188,7 +203,7 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
     self._annotation_id += gt_boxes.shape[0]
 
     # detections
-    self._detections_list.extend(coco_utils.convert_detections_to_coco_format(
+    self._detections_list.extend(coco_helpers.convert_detections_to_coco_format(
         image_id=self._image_id,
         category_id_set=self._category_id_set,
         detection_boxes=detection_dict['boxes'],
@@ -210,10 +225,10 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
         'categories': self._categories
     }
 
-    coco_wrapped_groundtruth = coco_utils.COCOWrapper(groundtruth_dict)
+    coco_wrapped_groundtruth = coco_helpers.COCOWrapper(groundtruth_dict)
     coco_wrapped_detections = coco_wrapped_groundtruth.LoadAnnotations(
         self._detections_list) 
-    box_evaluator = coco_utils.COCOEvalWrapper(
+    box_evaluator = coco_helpers.COCOEvalWrapper(
         coco_wrapped_groundtruth, coco_wrapped_detections, agnostic_mode=False)
     box_metrics, box_per_category_ap = box_evaluator.ComputeMetrics(
         include_metrics_per_category=self._include_metrics_per_category,

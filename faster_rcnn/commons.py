@@ -227,15 +227,16 @@ def compute_frcnn_loss(model,
 
     padding_indicator = tf.sequence_mask(num_proposals, 
         model.max_num_proposals, dtype=tf.float32)
-    sampled_sizes = tf.to_float(tf.maximum(num_proposals, 1))
+    # make sure `sample_sizes` >= 1 elementwise
+    sample_sizes = tf.to_float(tf.maximum(num_proposals, 1))
 
     loc_losses = model._frcnn_localization_loss_fn(box_encoding_predictions,
         batch_loc_targets, weights=batch_loc_weights * padding_indicator)
     cls_losses = model._frcnn_classification_loss_fn(class_predictions,
         batch_cls_targets, weights=batch_cls_weights * padding_indicator)
 
-    loc_loss = tf.reduce_mean(tf.reduce_sum(loc_losses, axis=1) / sampled_sizes)
-    cls_loss = tf.reduce_mean(tf.reduce_sum(cls_losses, axis=1) / sampled_sizes)
+    loc_loss = tf.reduce_mean(tf.reduce_sum(loc_losses, axis=1) / sample_sizes)
+    cls_loss = tf.reduce_mean(tf.reduce_sum(cls_losses, axis=1) / sample_sizes)
 
     loc_loss = tf.multiply(loc_loss, 
         model._frcnn_localization_loss_weight, name='frcnn_loc_loss')

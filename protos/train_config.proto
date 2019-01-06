@@ -25,4 +25,8 @@ message TrainConfig {
   optional string load_ckpt_path = 9;
 
   optional string save_ckpt_path = 10;
+
+  optional string checkpoint_type = 11 [default = 'classification'];
+
+  optional bool include_global_step = 12 [default = true];
 }

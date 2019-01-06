@@ -49,6 +49,8 @@ flags.DEFINE_string('model_arch', None, 'Model architecture name.')
 
 FLAGS = flags.FLAGS
 
+tf.logging.set_verbosity(tf.logging.INFO)
+
 
 def main(_):
   label_map_config_path = FLAGS.label_map_config_path
@@ -58,9 +60,8 @@ def main(_):
   model_arch = FLAGS.model_arch
 
 
-  label_map = misc_utils.read_label_map(label_map_config_path)
-  num_classes = len(label_map)
-
+  label_map, num_classes = misc_utils.read_label_map(label_map_config_path)
+  print(num_classes)
   model_config = misc_utils.read_config(model_config_path, model_arch)
   dataset_config = misc_utils.read_config(dataset_config_path, 'dataset')
   test_config = misc_utils.read_config(test_config_path, 'test')
@@ -88,13 +89,16 @@ def main(_):
   sess = tf.Session()
 
   latest_checkpoint = tf.train.latest_checkpoint(load_ckpt_path)
+#  tf.logging.info('Reading from checkpoint %s... Done.' % latest_checkpoint)
+#  print(latest_checkpoint)
   restore_saver.restore(sess, latest_checkpoint)
 
+  class_indices = list(label_map.keys())
   if test_config.metrics_name == 'pascal_voc_detection_metrics':
-    met_calc = metrics_calculator.PascalVocMetricsCalculator(num_classes)
+    met_calc = metrics_calculator.PascalVocMetricsCalculator(num_classes, class_indices)
   elif test_config.metrics_name == 'coco_detection_metrics':
     categories = misc_utils.label_map_to_categories(label_map)
-    met_calc = metrics_calculator.MscocoMetricsCalculator(categories)
+    met_calc = metrics_calculator.MscocoMetricsCalculator(categories, class_indices)
 
   losses = []
   while True:
@@ -107,6 +111,7 @@ def main(_):
                                      detection_result['gt_boxes'],
                                      detection_result['gt_labels'])
   losses = np.array(losses)
+
   sess.close()
 
   misc_utils.print_evaluation_metrics(met_calc,

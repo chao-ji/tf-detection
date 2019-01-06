@@ -57,8 +57,8 @@ def compute_losses(model, prediction_dict, gt_boxlist_list):
     cls_losses = model.classification_loss_fn(
         class_predictions, 
         batch_cls_targets,
-        weights=batch_cls_weights, 
-        reduce_last_dim=True)
+        weights=batch_cls_weights)
+
 
     # scalar tensors: `loclization_loss`, `classification_loss`
     if model.hard_example_miner:
@@ -70,29 +70,24 @@ def compute_losses(model, prediction_dict, gt_boxlist_list):
       decoded_boxes_list = tf.unstack(tf.squeeze(decoded_boxes, axis=2))
       decoded_boxlist_list = [box_list.BoxList(decoded_boxes) 
           for decoded_boxes in decoded_boxes_list]
-      loc_loss, cls_loss = model.hard_example_miner(
+      mined_indicator = model.hard_example_miner(
           loc_losses=loc_losses,
           cls_losses=cls_losses,
           decoded_boxlist_list=decoded_boxlist_list,
           match_list=match_list)
-    else:
-      loc_loss = tf.reduce_sum(loc_losses)
-      cls_loss = tf.reduce_sum(cls_losses)
 
-    # optionally normalizes localization and/or classification loss
-    cls_loss_normalizer = tf.constant(1.0, dtype=tf.float32)
-    if model._normalize_loss_by_num_matches:
-      num_matches = tf.to_float(tf.reduce_sum(batch_loc_weights))
-      cls_loss_normalizer = tf.maximum(num_matches, cls_loss_normalizer)
-
-    loc_loss_normalizer = cls_loss_normalizer
-    if model._normalize_loc_loss_by_codesize:
-      loc_loss_normalizer *= model.box_coder.code_size
-
-    loc_loss = tf.multiply(loc_loss / loc_loss_normalizer,
-        model._localization_loss_weight, name='loc_loss')
-    cls_loss = tf.multiply(cls_loss / cls_loss_normalizer,
-        model._classification_loss_weight, name='cls_loss')
+      loc_losses = tf.multiply(loc_losses, mined_indicator)
+      cls_losses = tf.multiply(cls_losses, mined_indicator)
+#  sample_sizes = tf.maximum(tf.reduce_sum(mined_indicator, axis=1), 1)
+#  sample_sizes = tf.maximum(tf.reduce_sum(batch_loc_weights, axis=1), 1)
+  sample_sizes = tf.to_float(tf.maximum(tf.reduce_sum(batch_loc_weights), 1))
+#  loc_loss = tf.reduce_mean(tf.reduce_sum(loc_losses, axis=1) / sample_sizes)
+#  cls_loss = tf.reduce_mean(tf.reduce_sum(cls_losses, axis=1) / sample_sizes)
+  
+  loc_loss = tf.reduce_sum(loc_losses) / sample_sizes
+  cls_loss = tf.reduce_sum(cls_losses) / sample_sizes
+  loc_loss = tf.multiply(loc_loss, model._localization_loss_weight, name='loc_loss')
+  cls_loss = tf.multiply(cls_loss, model._classification_loss_weight, name='cls_loss')
 
   losses_dict = {
       LossTensorDictFields.localization_loss: loc_loss,

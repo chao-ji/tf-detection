@@ -146,5 +146,5 @@ def manual_stepping(global_step, boundaries, rates, warmup=False):
   lower_cond = tf.concat([tf.less(global_step, boundaries), [True]], 0)
   upper_cond = tf.concat([[True], tf.greater_equal(global_step, boundaries)], 0)
   indicator = tf.to_float(tf.logical_and(lower_cond, upper_cond))
-  learning_rate = tf.reduce_sum(rates * indicator)
+  learning_rate = tf.reduce_sum(rates * indicator, name='learning_rate')
   return learning_rate

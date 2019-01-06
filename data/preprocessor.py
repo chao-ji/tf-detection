@@ -7,6 +7,8 @@ from detection.core import standard_names as names
 from detection.core import box_list
 from detection.core import box_list_ops
 
+IMAGENET_MEAN = 124, 117, 104
+
 
 def _flip_image_left_right(image):
   """Horizontally flips an image.
@@ -64,6 +66,50 @@ def random_horizontal_flip(image, boxes, seed=None):
     return image, boxes
 
 
+def _strict_pad_image(image, boxes, height, width, value=IMAGENET_MEAN):
+  """Alwasy pad image to the desired height and width uniformly with the given 
+  pixel value.
+  
+  First draw a canvas of size [height, width] filled with pixel value `value`,
+  and then place the input image in the center, and update the boxes coordinates
+  to the new frame.
+
+  Args:
+    image: float tensor of shape [height_in, width_in, channels].
+    boxes: float tensor of shape [num_boxes, 4], where each row
+      contains normalized (i.e. values varying in [0, 1]) box coordinates:
+      [ymin, xmin, ymax, xmax].
+    height: float scalar, the desired height of padded image.
+    width: float scalar, the desired width of padded image.
+    value: float tensor of shape [3], RGB value to fill the padded region with.
+
+  Returns:
+    new image: float tensor of shape [height, width, channels].
+    new boxes: float tensor of shape [num_boxes, 4].
+  """
+  value = tf.to_float(value)
+  img_height, img_width, _ = tf.unstack(tf.shape(image))
+  img_height, img_width = tf.to_float(img_height), tf.to_float(img_width)
+  height = tf.maximum(height, img_height)
+  width = tf.maximum(width, img_width)
+
+  pad_up = (height - img_height) // 2
+  pad_down = height - img_height - pad_up
+  pad_left = (width - img_width) // 2
+  pad_right = width - img_width - pad_left
+
+  image -= value
+  new_image = tf.pad(image, [[pad_up, pad_down], [pad_left, pad_right], [0, 0]]) 
+  new_image += value
+
+  window = -pad_up, -pad_left, img_height + pad_down, img_width + pad_right
+  normalizer = img_height, img_width, img_height, img_width
+  window = tf.to_float(window) / tf.to_float(normalizer)
+  new_boxes = box_list_ops.change_coordinate_frame(
+      box_list.BoxList(boxes), window).get() 
+  return new_image, new_boxes
+
+
 def _strict_random_crop_image(image,
                               boxes,
                               labels,
@@ -74,8 +120,8 @@ def _strict_random_crop_image(image,
   """Always performs a random crop.
 
   A random window is cropped out of `image`, and the groundtruth boxes 
-  associated with the original image will be either removed, clipped or retaine 
-  as is depending on their relative location w.r.t. to the crop window.
+  associated with the original image will be either removed, clipped or retained 
+  as is, depending on their relative location w.r.t. to the crop window.
 
   Note: you may end up getting a cropped image without any groundtruth boxes. If
   that is the case, the output boxes and labels would simply be empty tensors 
@@ -140,6 +186,41 @@ def _strict_random_crop_image(image,
         clip_value_min=0.0, clip_value_max=1.0)
     new_labels = new_boxlist.get_field('labels')
     return new_image, new_boxes, new_labels
+
+
+def random_pad_image(image, boxes, pad_ratio=1.0, keep_prob=1.0, seed=None):
+  """Randomly pad an input image.
+
+  This function either pads the image so that `height` and `width` are scaled up
+  by a factor of `pad_ratio` with probability `1 - keep_prob`, or return the
+  input `image`, `boxes` unchanged with probability `keep_prob`.
+
+  Args:
+    image: a float tensor of shape [height, width, channels].
+    boxes: a float tensor of shape [num_boxes, 4], where each row 
+      contains normalized (i.e. values varying in [0, 1]) box coordinates: 
+      [ymin, xmin, ymax, xmax].
+    pad_ratio: float scalar >= 1.0, the factor by which the height and width to 
+      be scaled up.
+    keep_prob: float scalar, the probability to return the original
+      input. If 0, always performs a padding.
+    seed: int scalar, random seed.
+
+  Return:
+    image: new or original image with same rank as input.
+    boxes: new or original boxes with same rank as input.
+  """
+  print('\n\n\n', 'pad_ratio', pad_ratio, 'keep_prob', keep_prob, '\n\n\n\n\n')
+  selector = tf.random_uniform([], seed=seed)
+  do_random_pad = tf.greater(selector, keep_prob)
+
+  height, width, _ = tf.unstack(tf.shape(image))
+  height, width = tf.to_float(height), tf.to_float(width)
+  image, boxes = tf.cond(do_random_pad, 
+      lambda: _strict_pad_image(
+          image, boxes, height * pad_ratio, width * pad_ratio),
+      lambda: (image, boxes))
+  return image, boxes
 
 
 def random_crop_image(image,
@@ -353,14 +434,17 @@ def _get_fn_args_map():
           names.TensorDictFields.image,
           names.TensorDictFields.groundtruth_boxes,
           names.TensorDictFields.groundtruth_labels),
+      random_pad_image: (
+          names.TensorDictFields.image,
+          names.TensorDictFields.groundtruth_boxes),
       ssd_random_crop: (
           names.TensorDictFields.image,
           names.TensorDictFields.groundtruth_boxes,
           names.TensorDictFields.groundtruth_labels),
-      resize_image: (
-          names.TensorDictFields.image,),
-      rescale_image: (
-          names.TensorDictFields.image,),
+#      resize_image: (
+#          names.TensorDictFields.image,),
+#      rescale_image: (
+#          names.TensorDictFields.image,),
   }
   return fn_args_map
 

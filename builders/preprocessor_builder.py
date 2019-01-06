@@ -43,12 +43,15 @@ def build(config):
     elif step_type == 'random_crop_image':
       kwargs_map_list.append(
           _build_random_crop_image(option.random_crop_image))
+    elif step_type == 'random_pad_image':
+      kwargs_map_list.append(
+          _build_random_pad_image(option.random_pad_image))
     elif step_type == 'ssd_random_crop':
       kwargs_map_list.append(
           _build_ssd_random_crop(option.ssd_random_crop))
-    elif step_type == 'resize_image':
-      kwargs_map_list.append(
-          _build_resize_image(option.resize_image))
+#    elif step_type == 'resize_image':
+#      kwargs_map_list.append(
+#          _build_resize_image(option.resize_image))
     else:
       raise ValueError('Unknown option: {}'.format(step_type))
 
@@ -89,6 +92,23 @@ def _build_random_crop_image(config):
   return preprocessor.random_crop_image, kwargs_map
 
 
+def _build_random_pad_image(config):
+  """Builds random pad image function.
+
+  Args:
+    config: a protobuf message storing RandomPadImage configurations.
+
+  Returns:
+    a 2-tuple containing a callable performing random image padding and a dict 
+      holding the keyword-to-argument mapping.
+  """
+  if not isinstance(config, preprocessor_pb2.RandomPadImage):
+    raise ValueError('config must be an instance of RandomPadImage message.')
+
+  kwargs_map = {'pad_ratio': config.pad_ratio, 'keep_prob': config.keep_prob}
+  return preprocessor.random_pad_image, kwargs_map
+
+
 def _build_ssd_random_crop(config):
   """Builds ssd random image crop function.
 
@@ -120,23 +140,23 @@ def _build_ssd_random_crop(config):
   return preprocessor.ssd_random_crop, kwargs_map
 
 
-def _build_resize_image(config):
-  """Builds image resize function.
-
-  Args:
-    config: a protobuf message storing ResizeImage configurations.
-
-  Returns:
-    a 2-tuple containing a callable performing image resizing and a dict holding
-      keyword-to-argument mapping.
-  """
-  if not isinstance(config, preprocessor_pb2.ResizeImage):
-    raise ValueError('config')
-
-  kwargs_map = {'new_height': config.new_height,
-                'new_width': config.new_width,
-                'method': RESIZE_METHOD_MAP[config.method]}
-  return preprocessor.resize_image, kwargs_map
+#def _build_resize_image(config):
+#  """Builds image resize function.
+#
+#  Args:
+#    config: a protobuf message storing ResizeImage configurations.
+#
+#  Returns:
+#    a 2-tuple containing a callable performing image resizing and a dict holding
+#      keyword-to-argument mapping.
+#  """
+#  if not isinstance(config, preprocessor_pb2.ResizeImage):
+#    raise ValueError('config')
+#
+#  kwargs_map = {'new_height': config.new_height,
+#                'new_width': config.new_width,
+#                'method': RESIZE_METHOD_MAP[config.method]}
+#  return preprocessor.resize_image, kwargs_map
 
 
 def build_normalizer_fn(config):

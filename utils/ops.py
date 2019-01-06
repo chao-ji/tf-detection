@@ -6,71 +6,46 @@ from detection.utils import shape_utils
 
 slim = tf.contrib.slim
 
-#I
+
 def split_separable_conv2d(inputs,
                            num_outputs,
                            kernel_size,
-                           depth_multiplier,
+                           depth_multiplier=1,
                            stride=1,
-                           padding='SAME',
                            rate=1,
-                           depthwise_biases_initializer=None,
-                           scope=None,
-                           **kwargs):
-  """Separable 2D convolution split into a depthwise conv op followed by a 1x1 
-  pointwise conv op. This allows one to separately configure the batch-norm, 
-  biases, and the activation function of the depthwise conv op.
+                           scope=None):
+  """Separable 2D convolution split into depthwise and pointwise stages. One can 
+  separately configure batch-norm, activation function, weight initializer and
+  regularizer, etc., for the pointwise and the depthwise conv op.
 
   Args:
-    inputs: A tensor of size [batch_size, height, width, channels]. 
-    num_outputs: The number of pointwise convolution output filters. If is
-      None, then we skip the pointwise convolution stage. 
-    kernel_size: A list of length 2: [kernel_height, kernel_width] of
-      of the filters. Can be an int if both values are the same. 
-    depth_multiplier: The number of depthwise convolution output channels for
-      each input channel. The total number of depthwise convolution output
-      channels will be equal to `num_filters_in * depth_multiplier`.
-    stride: A list of length 2: [stride_height, stride_width], specifying the
-      depthwise convolution stride. Can be an int if both strides are the same.
-    padding: One of 'VALID' or 'SAME'.
-    rate: A list of length 2: [rate_height, rate_width], specifying the dilation
-      rates for atrous convolution. Can be an int if both rates are the same.
-    depthwise_biases_initializer: The biases initializer for the depthwise conv.
-      If any value is larger than one, then both stride values need to be one.
-    scope: Optional scope for variable_scope.
-    **kwargs: additional keyword arguments to pass to slim.conv2d or
-      slim.separable_conv2d
+    inputs: 4-D float tensor of shape [batch_size, height, width, channels].
+    num_outputs: int scalar, the depth of the output tensor.
+    kernel_size: int scalar or a 2-tuple of ints, kernel size.
+    depth_multiplier: int scalar, num of depthwise conv output channels for each 
+      input channel. The total num of depthwise conv output channels equals 
+      `depth_in * depth_multiplier`.
+    stride: int scalar or a 2-tuple of ints, stride for the depthwise conv.
+    rate: int scalar or a 2-tuple of ints, atrous rate for the depthwise conv.
+    scope: string scalar, scope name.
+
+  Returns:
+    4-D float tensor of shape [batch_size, height_out, width_out, channesl_out].
   """
-  depthwise = slim.separable_conv2d(
+  outputs = slim.separable_conv2d(
       inputs,
       None,
       kernel_size,
       depth_multiplier,
       stride=stride,
-      padding=padding,
       rate=rate,
-      biases_initializer=depthwise_biases_initializer,
-      scope=scope + '_depthwise',
-      **kwargs)
-  pointwise = slim.conv2d(depthwise,
-                          num_outputs,
-                          kernel_size=1,
-                          stride=1,
-                          padding='SAME',
-                          scope=scope + '_pointwise')
-  return pointwise
-
-
-def normalized_to_absolute_coordinates(boxes_normalized, image_shape):
-  def _to_absolute_coordinates(normalized_boxes):
-    normalized_boxes = normalized_boxes[0]
-    return box_list_ops.to_absolute_coordinates(
-        box_list.BoxList(normalized_boxes),
-        image_shape[1], image_shape[2]).get(),
-
-  absolute_boxes = shape_utils.static_map_fn(_to_absolute_coordinates, elems=(boxes_normalized,))
-  return absolute_boxes
-
+      scope=scope + '_depthwise')
+  return slim.conv2d(outputs,
+                     num_outputs,
+                     kernel_size=1,
+                     stride=1,
+                     padding='SAME',
+                     scope=scope + '_pointwise')
 
 
 def get_unit_square(batch_size=None):
@@ -90,9 +65,8 @@ def get_unit_square(batch_size=None):
     return tf.convert_to_tensor([[0., 0., 1., 1.] for _ in range(batch_size)])
 
 
-
 def random_sample(tensor, sample_size, seed=None):
-  """Randomly samples `sample_size` elements from `tensor` along the first 
+  """Randomly samples `sample_size` elements from `tensor` along the 0th 
   dimension. Or returns `tensor` as is if `sample_size` is greater than or
   equal to `tf.shape(tensor)[0]`.
 
@@ -128,12 +102,13 @@ def balanced_subsample(indicator, sample_size, labels, pos_frac=0.5, seed=None):
       are to be sampled from.
     sample_size: int scalar, num of samples to be drawn from `indicator`.
     labels: bool tensor of shape [batch_size], holding binary class labels.
+    pos_frac: float scalar, fraction of positives of the entire sample.
+    seed: int scalar, random seed.
 
   Returns:
     sampled_indicator: bool tensor of shape [batch_size] holding the subset
       sampled from the input.
   """
-  seed = 0
   neg_indicator = tf.logical_not(labels)
   pos_indicator = tf.logical_and(labels, indicator)
   neg_indicator = tf.logical_and(neg_indicator, indicator)
@@ -177,7 +152,7 @@ def create_gradient_update_op(optimizer,
   update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
   grads_and_vars = optimizer.compute_gradients(loss)
-
+  
   if gradient_clipping_by_norm > 0:
       with tf.name_scope('clip_grads'):
         grads_and_vars = slim.learning.clip_gradient_norms(
@@ -191,11 +166,3 @@ def create_gradient_update_op(optimizer,
   grouped_update_op = tf.group(*update_ops, name='update_barrier')
 
   return grouped_update_op
-
-#I
-def reduce_sum_trailing_dimensions(tensor, ndims):
-  """Computes sum across all dimensions following first `ndims` dimensions."""
-  return tf.reduce_sum(tensor, axis=tuple(range(ndims, tensor.shape.ndims)))
-
-
-

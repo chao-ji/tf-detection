@@ -349,6 +349,7 @@ def build_feature_extractor(config):
       output_stride=output_stride,
       weight_decay=weight_decay,
       reuse_weights=reuse_weights)
+    return feature_extractor
   else:
     pass
 

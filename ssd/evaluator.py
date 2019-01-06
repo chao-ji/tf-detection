@@ -3,7 +3,6 @@ import tensorflow as tf
 from detection.core import box_list
 from detection.core import box_list_ops
 
-
 from detection.core.standard_names import ModeKeys
 from detection.core.standard_names import TensorDictFields 
 from detection.core.standard_names import PredTensorDictFields
@@ -13,6 +12,7 @@ from detection.core.standard_names import DetTensorDictFields
 from detection.ssd import detection_model
 from detection.ssd import commons 
 from detection.utils import misc_utils
+
 
 class SsdModelEvaluator(detection_model.DetectionModel):
   """Evaluates a trained SSD detection model.
@@ -35,8 +35,6 @@ class SsdModelEvaluator(detection_model.DetectionModel):
 
                localization_loss_weight,
                classification_loss_weight,
-               normalize_loss_by_num_matches,
-               normalize_loc_loss_by_codesize,
                add_background_class):
 
     """Constructor.
@@ -65,10 +63,6 @@ class SsdModelEvaluator(detection_model.DetectionModel):
         localization loss relative to classification loss.
       classification_loss_weight: float scalar, scales the contribution of
         classification loss relative to localization loss.
-      normalize_loss_by_num_matches: bool scalar, whether to normalize both
-        types of losses by num of matches.    
-      normalize_loc_loss_by_codesize: bool scalar, whether to normalize 
-        localization loss by box code size (e.g. 4 for the default box coder.)
       add_background_class: bool scalar, whether to add background class. 
         Should be False if the examples already contains background class.
     """
@@ -90,8 +84,6 @@ class SsdModelEvaluator(detection_model.DetectionModel):
 
     self._localization_loss_weight = localization_loss_weight
     self._classification_loss_weight = classification_loss_weight
-    self._normalize_loss_by_num_matches = normalize_loss_by_num_matches
-    self._normalize_loc_loss_by_codesize = normalize_loc_loss_by_codesize 
     self._add_background_class = add_background_class
 
   @property

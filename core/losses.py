@@ -127,7 +127,7 @@ class WeightedSmoothL1LocalizationLoss(Loss):
 class WeightedSigmoidClassificationLoss(Loss):
   """Sigmoid cross entropy classification loss function."""
 
-  def _compute_loss(self, predictions, targets, weights, reduce_last_dim=False):
+  def _compute_loss(self, predictions, targets, weights):
     """Compute loss.
 
     Args:
@@ -137,21 +137,17 @@ class WeightedSigmoidClassificationLoss(Loss):
         holding one-hot encoded classification targets.
       weights: float tensor of shape [batch_size, num_anchors], holding 
         anchorwise weights.
-      reduce_last_dim: bool scalar, whether to reduce-sum the last dimension of
-        the loss tensor. Defaults to False.
 
     Returns:
-      float tensor of shape [batch_size, num_anchors, num_classes] or 
-        [batch_size, num_anchors] (`reduce_last_dim == True`), holding the
-        anchorwise (and classwise) loss.
+      loss: a float tensor of shape [batch_size, num_anchors], holding the 
+        anchorwise loss.
     """
     weights = tf.expand_dims(weights, 2)
     sigmoid_loss = tf.nn.sigmoid_cross_entropy_with_logits(
         labels=targets, logits=predictions)
     sigmoid_loss *= weights
-    if reduce_last_dim:
-      sigmoid_loss = tf.reduce_sum(sigmoid_loss, axis=2)
-    return sigmoid_loss
+    return tf.reduce_sum(sigmoid_loss, axis=2)
+
 
 class WeightedSoftmaxClassificationLoss(Loss):
   """Softmax cross entropy classification loss function.
@@ -265,13 +261,11 @@ class HardExampleMiner(object):
         positive-to-negative ratio.
 
     Returns:
-      mined_loc_loss: a float scalar with sum (over the minibatch) of 
-        localization losses from selected hard examples.
-      mined_cls_loss: a float scalar with sum (over the minibatch) of 
-        classification losses from selected hard examples.
+      mined_indicator: a float tensor of shape [batch_size, num_anchors], 
+        indicating the entries of selected batchwise, anchorwise losses.
     """
-    mined_loc_losses = []
-    mined_cls_losses = []
+    mined_indicator = []
+    num_anchors = loc_losses.shape[1]
     loc_losses = tf.unstack(loc_losses)
     cls_losses = tf.unstack(cls_losses)
     batch_size = len(decoded_boxlist_list)
@@ -287,12 +281,7 @@ class HardExampleMiner(object):
       raise ValueError('match_list must either be None or have '
                        'length=len(decoded_boxlist_list).')
 
-    num_positives_list = []
-    num_negatives_list = []
-    
-
     for i, detection_boxlist in enumerate(decoded_boxlist_list):
-
       match = match_list[i]
 
       anchor_losses = cls_losses[i]
@@ -313,21 +302,11 @@ class HardExampleMiner(object):
             ) = self._subsample_selection_to_desired_neg_pos_ratio(
             selected_indices, match, self._max_negatives_per_positive,
             self._min_negatives_per_image)
-        num_positives_list.append(num_positives)
-        num_negatives_list.append(num_negatives)
+        mined_indicator.append(
+            tf.reduce_sum(tf.one_hot(selected_indices, num_anchors), axis=0))
+    mined_indicator = tf.stack(mined_indicator)
 
-      mined_loc_losses.append(
-          tf.reduce_sum(tf.gather(loc_losses[i], selected_indices)))
-      mined_cls_losses.append(
-          tf.reduce_sum(tf.gather(cls_losses[i], selected_indices)))
-
-    loc_loss = tf.reduce_sum(tf.stack(mined_loc_losses))
-    cls_loss = tf.reduce_sum(tf.stack(mined_cls_losses))
-
-    if match and self._max_negatives_per_positive:
-      self._num_positives_list = num_positives_list
-      self._num_negatives_list = num_negatives_list
-    return loc_loss, cls_loss
+    return mined_indicator
 
   def _subsample_selection_to_desired_neg_pos_ratio(self,
                                                     indices,

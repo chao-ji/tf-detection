@@ -57,8 +57,7 @@ def main(_):
   model_arch = FLAGS.model_arch
 
 
-  label_map = misc_utils.read_label_map(label_map_config_path)
-  num_classes = len(label_map)
+  label_map, num_classes = misc_utils.read_label_map(label_map_config_path)
 
   model_config = misc_utils.read_config(model_config_path, model_arch)
   dataset_config = misc_utils.read_config(dataset_config_path, 'dataset')

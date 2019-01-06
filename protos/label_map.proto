@@ -8,5 +8,6 @@ message LabelMap {
     optional string label = 2;
   }
   repeated LabelMapItem label_map_item = 1;
+  optional int32 num_classes = 2;
 }
 

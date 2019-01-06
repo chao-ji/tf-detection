@@ -10,12 +10,19 @@ message PreprocessingStep {
   oneof preprocessing_step_oneof {
     RandomHorizontalFlip random_horizontal_flip = 2;
     RandomCropImage random_crop_image = 12;
+    RandomPadImage random_pad_image = 13;
     SSDRandomCrop ssd_random_crop = 21;
     ResizeImage resize_image = 19;
   }
 }
 
 message RandomHorizontalFlip {
+}
+
+message RandomPadImage {
+  optional float pad_ratio = 1 [default = 1.0];
+
+  optional float keep_prob = 2 [default = 1.0];
 }
 
 message RandomCropImage {

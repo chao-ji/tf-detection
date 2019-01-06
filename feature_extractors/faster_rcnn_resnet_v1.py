@@ -99,7 +99,7 @@ class FasterRcnnResnet101V1FeatureExtractor(FasterRcnnResnetV1FeatureExtractor):
                output_stride,
                weight_decay=0.0,
                reuse_weights=None):
-    """Constructor:
+    """Constructor.
 
     Args:
       output_stride: int scalar, output stride (e.g. 16, 32).

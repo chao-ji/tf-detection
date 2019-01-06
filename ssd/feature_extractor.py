@@ -12,8 +12,7 @@ class SsdFeatureExtractor(object):
                conv_hyperparams_fn,
                depth_multiplier,
                reuse_weights=None,
-               use_depthwise=False,
-               override_base_feature_extractor_hyperparams=False):
+               use_depthwise=False):
     """Constructor.
 
     Args:
@@ -27,16 +26,11 @@ class SsdFeatureExtractor(object):
         `tf.variable_scope`.
       use_depthwise: bool scalar, whether to use separable_conv2d instead of
         conv2d.
-      override_base_feature_extractor_hyperparams: bool scalar, whether to 
-        override hyperparameters of the base feature extractor with the one
-        from `conv_hyperparams_fn`.
     """
     self._conv_hyperparams_fn = conv_hyperparams_fn
     self._depth_multiplier = depth_multiplier
     self._reuse_weights = reuse_weights
     self._use_depthwise = use_depthwise
-    self._override_base_feature_extractor_hyperparams = (
-        override_base_feature_extractor_hyperparams)
 
   @abstractmethod
   def extract_features(self, inputs):

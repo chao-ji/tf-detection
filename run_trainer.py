@@ -20,6 +20,8 @@ Example:
     --train_config_path=faster_rcnn/train_config.config \
     --model_arch=faster_rcnn_model
 """
+import sys
+
 import tensorflow as tf
 
 from detection.builders import ssd_model_builder
@@ -44,6 +46,8 @@ flags.DEFINE_string('model_arch', None, 'Model architecture name.')
 
 FLAGS = flags.FLAGS
 
+tf.logging.set_verbosity(tf.logging.INFO)
+
 
 def main(_):
   label_map_config_path = FLAGS.label_map_config_path
@@ -53,8 +57,8 @@ def main(_):
   model_arch = FLAGS.model_arch
 
 
-  label_map = misc_utils.read_label_map(label_map_config_path)
-  num_classes = len(label_map)
+  label_map, num_classes = misc_utils.read_label_map(label_map_config_path)
+  print(num_classes)
 
   model_config = misc_utils.read_config(model_config_path, model_arch)
   dataset_config = misc_utils.read_config(dataset_config_path, 'dataset')
@@ -76,10 +80,18 @@ def main(_):
   save_ckpt_path = train_config.save_ckpt_path
   files = list(train_config.input_file)
 
-  grouped_update_op, total_loss, global_step = model_trainer.train(
+  total_loss, global_step = model_trainer.train(
       files, dataset, optimizer_builder_fn)
 
-  restore_saver = model_trainer.create_restore_saver(load_ckpt_path)
+  checkpoint_type = train_config.checkpoint_type
+  load_all_detection_checkpoint_vars = (True if 
+      checkpoint_type == 'detection' else False)
+
+  restore_saver = model_trainer.create_restore_saver(
+      load_ckpt_path, 
+      checkpoint_type=checkpoint_type,
+      load_all_detection_checkpoint_vars=load_all_detection_checkpoint_vars,
+      include_global_step=train_config.include_global_step)
 
   persist_saver = model_trainer.create_persist_saver(
       max_to_keep=train_config.max_to_keep)
@@ -91,15 +103,18 @@ def main(_):
 
   restore_saver.restore(sess, load_ckpt_path)
 
-  for i in range(train_config.num_steps):
-    _, loss, gs = sess.run([grouped_update_op, total_loss, global_step])
-    if i % train_config.print_progress_every_n_steps == 0:
+  while True:
+    loss, gs = sess.run([total_loss, global_step])
+    if gs % train_config.print_progress_every_n_steps == 0:
       print('step={}, loss={}'.format(gs, loss))
-    if (i >= train_config.start_save_ckpt_after_n_steps and 
-        i % train_config.save_ckpt_every_n_steps == 0):
-      persist_saver.save(sess, save_ckpt_path, global_step=global_step)
+      sys.stdout.flush()
+    if (gs >= train_config.start_save_ckpt_after_n_steps and
+        gs % train_config.save_ckpt_every_n_steps == 0):
+      persist_saver.save(sess, save_ckpt_path, global_step=gs)
+    if gs > train_config.num_steps:
+      break
 
-  persist_saver.save(sess, save_ckpt_path, global_step=global_step)
+  persist_saver.save(sess, save_ckpt_path)
 
   sess.close()
 

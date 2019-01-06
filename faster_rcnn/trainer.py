@@ -12,8 +12,6 @@ from detection.utils import variables_utils as var_utils
 from detection.utils import misc_utils
 from detection.utils import ops
 
-slim = tf.contrib.slim
-
 
 class FasterRcnnModelTrainer(detection_model.DetectionModel):
   """Trains a Faster RCNN model."""
@@ -213,37 +211,35 @@ class FasterRcnnModelTrainer(detection_model.DetectionModel):
     total_loss = tf.add_n(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         + [frcnn_loc_loss, frcnn_cls_loss, rpn_loc_loss, rpn_cls_loss])
 
-
-
-
     global_step = tf.train.get_or_create_global_step()
     optimizer, learning_rate = optimizer_builder_fn()
-#    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) 
-#    grads_and_vars = optimizer.compute_gradients(total_loss)
-#    if self._gradient_clipping_by_norm > 0:
-#      with tf.name_scope('clip_grads'):
-#        grads_and_vars = slim.learning.clip_gradient_norms(
-#            grads_and_vars, self._gradient_clipping_by_norm)
-#    grad_update_op = optimizer.apply_gradients(
-#        grads_and_vars, global_step=global_step)
-#    update_ops.append(grad_update_op)
-#    grouped_update_op = tf.group(*update_ops, name='update_barrier')
     grouped_update_op = ops.create_gradient_update_op(optimizer, 
         total_loss, global_step, self._gradient_clipping_by_norm)
 
-    return grouped_update_op, total_loss, global_step
+    total_loss = tf.check_numerics(total_loss, 'Loss Tensor is inf or nan.')
+    with tf.control_dependencies([grouped_update_op]):
+      total_loss = tf.identity(total_loss)
+
+    return total_loss, global_step
 
   def _get_vars_map(self, 
-                    fine_tune_checkpoint_type='classification',
+                    checkpoint_type='classification',
                     load_all_detection_checkpoint_vars=False):
-    """
+    """Returns a mapping from var name to var tensor for restoring variables 
+    from a checkpoint.
+
     Args:
-      fine_tune_checkpoint_type:
-      load_all_detection_checkpiont_vars:
+      checkpoint_type: a string scalar, type of checkpoint from which
+        to initialize variables. 'classification' for a pretrained 
+        classification model (e.g. Inception, ResNet); 'detection' for a 
+        pretrained detection model.
+      load_all_detection_checkpiont_vars: a bool scalar, whether to load all
+        detection checkpoint variables.
 
     Returns:
+      a dict mapping from variable names to variable tensors.
     """
-    if fine_tune_checkpoint_type == 'classification':
+    if checkpoint_type == 'classification':
       vars_to_restore = {}
       for var in tf.global_variables():
         for scope in (self._feature_extractor._first_stage_feature_extractor_scope,
@@ -253,7 +249,7 @@ class FasterRcnnModelTrainer(detection_model.DetectionModel):
             vars_to_restore[var_name] = var
 
       return vars_to_restore     
-    elif fine_tune_checkpoint_type == 'detection':
+    elif checkpoint_type == 'detection':
       vars_to_restore = tf.global_variables()
       vars_to_restore.append(tf.train.get_or_create_global_step()) 
       include_patterns = None
@@ -263,28 +259,37 @@ class FasterRcnnModelTrainer(detection_model.DetectionModel):
             self._feature_extractor._second_stage_feature_extractor_scope)
       feature_extractor_vars = tf.contrib.framework.filter_variables(
           vars_to_restore, include_patterns=include_patterns)
-      return {var.op.name: var for var in feature_extractor_variables}
+      return {var.op.name: var for var in feature_extractor_vars}
 
-    raise ValueError('`fine_tune_checkpoint_type` must be either '
+    raise ValueError('`checkpoint_type` must be either '
         '"classification" or "detection".')
 
   def create_restore_saver(self,
                            load_ckpt_path,
-                           fine_tune_checkpoint_type='classification',
-                           load_all_detection_checkpoint_vars=False):
-    """
+                           checkpoint_type='classification',
+                           load_all_detection_checkpoint_vars=False,
+                           include_global_step=True):
+    """Creates restore saver for restoring variables from a checkpoint.
+
     Args:
-      load_ckpt_path:
-      fine_tune_checkpoint_type:
-      load_all_detection_checkpoint_vars:
+      load_ckpt_path: a string scalar, pointing to a checkpoint file ('*.ckpt').
+      checkpoint_type: a string scalar, type of checkpoint from which
+        to initialize variables. 'classification' for a pretrained 
+        classification model (e.g. Inception, ResNet), 'detection' for a 
+        pretrained detection model.
+      load_all_detection_checkpoint_vars: a bool scalar, whether to load all
+        detection checkpoint variables.
+      include_global_step: bool scalar, whether to restore global step in the
+        checkpoint.
 
     Returns:
+      restore_saver: a tf.train.Saver instance.
     """ 
-    vars_map = self._get_vars_map(fine_tune_checkpoint_type,
+    vars_map = self._get_vars_map(checkpoint_type,
                                   load_all_detection_checkpoint_vars)
 
     available_vars_map = var_utils.get_vars_available_in_ckpt(
-        vars_map, load_ckpt_path, include_global_step=False)
+        vars_map, load_ckpt_path, include_global_step=include_global_step)
 
     restore_saver = tf.train.Saver(available_vars_map)
     return restore_saver

@@ -1,6 +1,4 @@
-
 import tensorflow as tf
-
 
 from detection.core import box_list
 from detection.core import box_list_ops
@@ -117,7 +115,6 @@ class SsdModelInferencer(detection_model.DetectionModel):
         image_list, detection_dict)
 
     return to_be_run_tensor_dict
-
 
   def create_restore_saver(self):
     """Creates restore saver for restoring variables from a checkpoint.

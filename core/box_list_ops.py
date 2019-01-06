@@ -14,7 +14,7 @@ class SortOrder(object):
   ascend = 1
   descend = 2
 
-#C
+
 def scale(boxlist, yscale, xscale, scope=None):
   """Scale box coordinates in y (height) and x (width) dimensions. In-place
   operation.
@@ -39,7 +39,7 @@ def scale(boxlist, yscale, xscale, scope=None):
     boxlist.set(tf.stack([ymin, xmin, ymax, xmax], axis=1))
     return boxlist
 
-#C
+
 def clip_to_window(boxlist, window, filter_nonoverlapping=True, scope=None):
   """Clip boxes in a BoxList to a window, and optionally filter out boxes that
   do not overlap with the window. In-place operation.
@@ -72,7 +72,7 @@ def clip_to_window(boxlist, window, filter_nonoverlapping=True, scope=None):
       boxlist = gather(boxlist, nonzero_area_indices)
     return boxlist
 
-#C
+
 def intersection(boxlist1, boxlist2, scope=None):
   """Compute pairwise intersection areas between BoxLists.
 
@@ -98,7 +98,7 @@ def intersection(boxlist1, boxlist2, scope=None):
     intersect_widths = tf.maximum(0.0, pairwise_min_xmax - pairwise_max_xmin)
     return intersect_heights * intersect_widths
 
-#C
+
 def iou(boxlist1, boxlist2, scope=None):
   """Computes pairwise intersection-over-union between BoxLists.
 
@@ -124,7 +124,7 @@ def iou(boxlist1, boxlist2, scope=None):
         tf.equal(intersections, 0.0),
         tf.zeros_like(intersections), tf.truediv(intersections, unions))
 
-#C
+
 def ioa(boxlist1, boxlist2, scope=None):
   """Computes pairwise intersection-over-area between BoxLists.
 
@@ -145,7 +145,7 @@ def ioa(boxlist1, boxlist2, scope=None):
     areas = boxlist2.area()
     return tf.truediv(intersections, areas)
 
-#C
+
 def prune_completely_outside_window(boxlist, window, scope=None):
   """Removes any box in `boxlist` located **completely** outside of `window`.
   In-place operation.
@@ -172,7 +172,7 @@ def prune_completely_outside_window(boxlist, window, scope=None):
     boxlist = gather(boxlist, indices)
     return boxlist, indices
 
-#C
+
 def prune_outside_window(boxlist, window, scope=None):
   """Removes any box in `boxlist` located not completely inside of `window`.
   In-place operation.
@@ -199,7 +199,7 @@ def prune_outside_window(boxlist, window, scope=None):
     boxlist = gather(boxlist, indices)
     return boxlist, indices
 
-#C
+
 def prune_non_overlapping_boxes(
     boxlist1, boxlist2, min_overlap=0.0, scope=None):
   """For each box `b_i` in `boxlist1`, and each box `b_j` in `boxlist2`, we
@@ -225,7 +225,7 @@ def prune_non_overlapping_boxes(
     boxlist1 = gather(boxlist1, indices)
     return boxlist1, indices
 
-#C
+
 def change_coordinate_frame(boxlist, window, scope=None):
   """Change box coordinates of BoxList to be relative to window's frame. 
   In-place operation.
@@ -257,7 +257,7 @@ def change_coordinate_frame(boxlist, window, scope=None):
     boxlist = scale(boxlist, 1.0 / win_height, 1.0 / win_width)
     return boxlist
 
-#C
+
 def gather(boxlist, indices, scope=None):
   """Gather a subset of boxes in `boxlist` (along with their data fields), 
   whose indices are present in `indices`. In-place operation.
@@ -277,7 +277,7 @@ def gather(boxlist, indices, scope=None):
       boxlist.set_field(field, tf.gather(boxlist.get_field(field), indices))
     return boxlist
 
-# C
+
 def concatenate(boxlists, scope=None):
   """Concatenate a list of BoxLists. 
 
@@ -304,7 +304,7 @@ def concatenate(boxlists, scope=None):
       concatenated.set_field(field, concatenated_field)
     return concatenated
 
-# C
+
 def sort_by_field(boxlist, field, order=SortOrder.descend, scope=None):
   """Sort boxes and associated fields according to a scalar value.
   In-place operation.
@@ -332,7 +332,7 @@ def sort_by_field(boxlist, field, order=SortOrder.descend, scope=None):
       sorted_indices = tf.reverse_v2(sorted_indices, [0])
     return gather(boxlist, sorted_indices)
 
-#C
+
 def filter_by_score(boxlist, thresh, scope=None):
   """Filter the BoxList so that only those with 
   `boxlist.get_field('score') > threshold` are retained. In-place operation.
@@ -354,7 +354,7 @@ def filter_by_score(boxlist, thresh, scope=None):
         tf.reshape(tf.where(tf.greater(scores, thresh)), [-1]))
     return gather(boxlist, high_score_indices)
 
-#C
+
 def to_absolute_coordinates(boxlist,
                             height,
                             width,
@@ -379,7 +379,7 @@ def to_absolute_coordinates(boxlist,
     width = tf.to_float(width)
     return scale(boxlist, height, width)
 
-#C
+
 def pad_or_clip_box_list(boxlist, size, scope=None):
   """Pads or clips all fields of a BoxList. In-place operation.
 
@@ -420,4 +420,3 @@ def to_normalized_coordinates(boxlist, height, width, scope=None):
     height = 1. / tf.to_float(height)
     width = 1. / tf.to_float(width)
     return scale(boxlist, height, width)
-
