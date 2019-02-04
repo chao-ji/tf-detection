@@ -209,7 +209,7 @@ The images annotated with predicted boxes are named as `dog.jpg` for the `dog.np
 The following combinations of object detector and feature extractor were trained on the union of the `trainval` splits of Pascal VOC 2007 and `trainval` splits of VOC 2012, and were evaluated on the VOC 2007 `test` split. The goal is to achieve comparable results prepresented in the respective papers so similar parameter settings were used.
 
 
-**AP\@0.5IOU**: a detected box is considered as true positive if it overlaps a groundtruth box of the same object class with IOU >= 0.5.
+**AP\@0.5**: a detected box is considered as true positive if it overlaps a groundtruth box of the same object class with IOU >= 0.5.
 
 object detector|SSD|SSD|Faster R-CNN|Faster R-CNN|
 -|-|-|-|-|
@@ -240,11 +240,25 @@ tvmonitor| 0.7132| 0.6404|0.7442|0.7666
 
 
 ### COCO dataset
+The following combinations of object detector and feature extractor were trained on the train2017 split (118k images) of COCO dataset, and evaluated on val2017 split (5k images).
 
+**AP\@x**: a detected box is considered as true positive if it overlaps a groundtruth box of the same object class with IOU >= x. So **AP\@0.50:0.95** is averaged over **AP\@0.50**, **AP\@0.55**, ..., **AP\@0.95**.  
+
+object detector |SSD|Faster R-CNN|
+-|-|-|
+**feature extractor**|**inception-v2**|**inception-v2**|
+AP\@0.50:0.95 |**0.205**| **0.275** |
+AP\@0.50 |0.359| 0.472 |
+AP\@0.75 |0.203| 0.280 | |
+AP\@0.50:0.95(S) |0.014| 0.056 |
+AP\@0.50:0.95(M) |0.103| 0.245 |
+AP\@0.50:0.95(L) |0.377| 0.422 |
 
 # References
 
-* Official TensorFlow Object Detection API
-* Fast R-CNN
-* Faster R-CNN
-* SSD
+* [Official TensorFlow Object Detection API](https://github.com/tensorflow/models/tree/master/research/object_detection)
+* Fast R-CNN, [arxiv1504.08083](https://arxiv.org/abs/1504.08083)
+* Faster R-CNN, [arxiv1506.01497](https://arxiv.org/abs/1506.01497)
+* SSD, [arxiv1512.02325](https://arxiv.org/abs/1512.02325)
+* COCO dataset, [http://cocodataset.org/#home](http://cocodataset.org/#home)
+* PASCAL VOC dataset, [http://host.robots.ox.ac.uk:8080/pascal/VOC/index.html](http://host.robots.ox.ac.uk:8080/pascal/VOC/index.html)
