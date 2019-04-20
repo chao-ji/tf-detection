@@ -75,10 +75,6 @@ class FasterRcnnResnetV1FeatureExtractor(
     Returns:
       proposal_classifier_features: float tensor of shape
         [batch_size * num_proposals, height_out, width_out, depth_out]
-
-    Note that the conv layers in the funtion combined will have the same
-    effect of a conv layer with 'stride = 2', so 
-    `height_out = (height_in + 1) / 2` and `width_out = (width_in + 1) / 2`.
     """
     with tf.variable_scope(self._resnet_name, reuse=self._reuse_weights):
       with slim.arg_scope(
@@ -90,6 +86,7 @@ class FasterRcnnResnetV1FeatureExtractor(
             [{'depth': 2048, 'depth_bottleneck': 512, 'stride': 1}] * 3)]
         proposal_classifier_features = resnet_utils.stack_blocks_dense(
             proposal_feature_maps, blocks)
+
     return proposal_classifier_features
 
 

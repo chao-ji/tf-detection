@@ -12,10 +12,13 @@ def build(config):
   Returns:
     localization_loss_fn: a callable that computes localization loss.
     classification_loss_fn: a callable that computes classification loss.
+    mask_loss_fn: a callable that computes mask loss.
     localization_loss_weight: float scalar, scales the contribution of 
         localization loss relative to classification loss.
     classification_loss_weight: float scalar, scales the contribution of
         classification loss relative to localization loss.
+    mask_loss_weight: float scalar, scales the contribution of mask loss
+        relative to localization loss and classification loss.
     hard_example_miner: a callable that performs hard example mining such
         that gradient is backpropagated to high-loss anchorwise predictions.
   """
@@ -26,9 +29,16 @@ def build(config):
       config.localization_loss)
   classification_loss_fn = _build_classification_loss(
       config.classification_loss)
+  mask_loss_fn = None
+  if config.HasField('mask_loss'):
+    mask_loss_fn = _build_classification_loss(
+        config.mask_loss)
 
   localization_loss_weight = config.localization_weight
   classification_loss_weight = config.classification_weight
+  mask_loss_weight = None
+  if config.HasField('mask_weight'):
+    mask_loss_weight = config.mask_weight
 
   hard_example_miner = None
   if config.HasField('hard_example_miner'):
@@ -37,8 +47,9 @@ def build(config):
         classification_loss_weight,
         localization_loss_weight)
 
-  return (localization_loss_fn, classification_loss_fn, 
-      localization_loss_weight, classification_loss_weight, hard_example_miner)
+  return (localization_loss_fn, classification_loss_fn, mask_loss_fn, 
+      localization_loss_weight, classification_loss_weight, mask_loss_weight, 
+      hard_example_miner)
 
 
 def _build_classification_loss(config):

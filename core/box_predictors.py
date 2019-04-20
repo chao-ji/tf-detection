@@ -19,7 +19,6 @@ class BoxPredictor(object):
     -- a (or a list of) tensor(s) holding box location encoding predictions.
     -- a (or a list of) tensor(s) holding class score predictions.
   """
-
   __metaclass__ = ABCMeta
 
   def __init__(self, num_classes, box_code_size=4):
@@ -43,6 +42,7 @@ class BoxPredictor(object):
     Args:
       feature_map_tensor_list: a list of float tensors of shape 
         [batch_size, height_i, width_i, channels_i].
+      scope: string scalar, name scope.
 
     Returns:
       box_encoding_predictions_list: a list of float tensors of shape 
@@ -219,8 +219,16 @@ class RcnnBoxPredictor(BoxPredictor):
 
   Generates box location encoding predictions and class score predictions for 
   the Fast RCNN branch in a Faster RCNN network. It takes as input a feature
-  map of shape [batch_size, height, width, channels]. The slice [i, :, :, :]
-  holds the features of the ith proposal from the RPN.
+  map of shape [batch_num_proposals, height, width, channels], where slice 
+  [i, :, :, :] holds the features of the ith proposal from the RPN, and outputs 
+  box encoding predictions tensor of shape 
+  [batch_num_proposals, 1, num_classes, 4], and class score predictions tensor 
+  of shape 
+  [batch_num_proposals, 1, num_classes + 1].
+
+  NOTE: the `batch_num_proposals` in the shape of input and output tensors is 
+  equal to `batch_size * max_num_proposals`, as the proposals from different 
+  images in the same batch are arranged in the 0th dimension.
   """
   def __init__(self,
                num_classes,
@@ -237,35 +245,34 @@ class RcnnBoxPredictor(BoxPredictor):
     super(RcnnBoxPredictor, self).__init__(num_classes, box_code_size)
     self._fc_hyperparams_fn = fc_hyperparams_fn
 
-  def _predict_boxes_and_classes(self, image_features):
+  def _predict_boxes_and_classes(self, feature_map):
     """Generates the box location encoding predictions and box class score 
-    predictions. Note the `batch_size` in the shape of input and output tensors 
-    is in fact the `batch_size * num_proposals` from the RPN, as the proposals 
-    from different images in the same batch are arranged in the 0th dimension.
+    predictions. 
 
     Args:
-      image_features: a tensor of shape [batch_size, height, width, channels].
+      feature_map: a tensor of shape 
+        [batch_num_proposals, height, width, channels].
 
     Returns:
       box_encoding_predictions_list: a tensor of shape 
-        [batch_size, 1, num_classes, 4], holding anchor-encoded box 
+        [batch_num_proposals, 1, num_classes, 4], holding anchor-encoded box 
         coordinate predictions (i.e. t_y, t_x, t_h, t_w).
       class_score_predictions_list: a tensor of shape
-        [batch_size, 1, num_classes + 1], holding one-hot
+        [batch_num_proposals, 1, num_classes + 1], holding one-hot
         encoded box class score predictions.
     """
-    spatial_averaged_image_features = tf.reduce_mean(
-        image_features, [1, 2], keepdims=True, name='AvgPool')
+    spatial_averaged_feature_map = tf.reduce_mean(
+        feature_map, [1, 2], keepdims=True, name='AvgPool')
 
-    flattened_image_features = tf.squeeze(spatial_averaged_image_features)
+    flattened_feature_map = tf.squeeze(spatial_averaged_feature_map)
     with slim.arg_scope(self._fc_hyperparams_fn()):
       box_encodings = slim.fully_connected(
-          flattened_image_features,
+          flattened_feature_map,
           self._num_classes * self._box_code_size,
           activation_fn=None,
           scope='BoxEncodingPredictor')
       class_predictions = slim.fully_connected(
-          flattened_image_features,
+          flattened_feature_map,
           self._num_classes + 1,
           activation_fn=None,
           scope='ClassPredictor')
@@ -277,29 +284,26 @@ class RcnnBoxPredictor(BoxPredictor):
 
     return box_encodings, class_predictions
 
-  def _predict(self, image_features):
+  def _predict(self, feature_map_tensor_list):
     """Generates the box location encoding predictions and box class score 
-    predictions. Note the `batch_size` in the shape of input and output tensors 
-    is in fact the `batch_size * num_proposals` from the RPN, as the proposals 
-    from different images in the same batch are arranged in the 0th dimension.
+    predictions. 
 
     Args:
-      image_features: a list (length 1) of float tensors of shape 
-        [batch_size, height, width, channels].
+      feature_map_tensor_list: a list (length 1) of float tensors of shape 
+        [batch_num_proposals, height, width, channels].
 
     Returns:
-      box_encoding_predictions_list: a list (length 1) of float tensors of shape 
-        [batch_size, 1, num_classes, 4], holding anchor-encoded box 
+      box_encoding_predictions_list: a list (length 1) of float tensors of shape
+        [batch_num_proposals, 1, num_classes, 4], holding anchor-encoded box 
         coordinate predictions (i.e. t_y, t_x, t_h, t_w).
       class_score_predictions_list: a list (length 1) of float tensors of shape
-        [batch_size, 1, num_classes + 1], holding one-hot
+        [batch_num_proposals, 1, num_classes + 1], holding one-hot
         encoded box class score predictions.      
     """
     # [1 * 300, 4, 4, 1024]
-    image_features = image_features[0]
     box_encodings, class_predictions = self._predict_boxes_and_classes(
-        image_features) 
-    box_encodings = [box_encodings]
-    class_predictions = [class_predictions]
-    return box_encodings, class_predictions
+        feature_map_tensor_list[0]) 
+    box_encoding_predictions_list = [box_encodings]
+    class_score_predictions_list = [class_predictions]
+    return box_encoding_predictions_list, class_score_predictions_list
 

@@ -3,37 +3,48 @@ import time
 from collections import OrderedDict
 
 import tensorflow as tf
+import numpy as np
 
 from pycocotools import coco
 from pycocotools import cocoeval
-
+from pycocotools import mask
 
 def convert_groundtruth_to_coco_format(image_id, 
                                        next_annotation_id, 
                                        category_id_set,
                                        groundtruth_boxes,
-                                       groundtruth_classes):
+                                       groundtruth_classes,
+                                       groundtruth_iscrowd=None,
+                                       groundtruth_masks=None):
 
   num_boxes = groundtruth_classes.shape[0]
+  iscrowd_list = groundtruth_iscrowd or [0] * num_boxes
+
   groundtruth_list = []
   for i in range(num_boxes):
     _check_id(groundtruth_classes[i], category_id_set)
-    groundtruth_list.append({
+    result_dict = {
       'id': next_annotation_id + i,
       'image_id': image_id,
       'category_id': int(groundtruth_classes[i]),
       'bbox': list(_convert_box_to_coco_format(groundtruth_boxes[i, :])),
       'area': float((groundtruth_boxes[i, 2] - groundtruth_boxes[i, 0]) *
                     (groundtruth_boxes[i, 3] - groundtruth_boxes[i, 1])),
-      'iscrowd': 0})
+      'iscrowd': iscrowd_list[i]}
+
+    if groundtruth_masks is not None:
+      result_dict['segmentation'] = mask.encode(
+          np.asfortranarray(groundtruth_masks[i]))
+    groundtruth_list.append(result_dict)
+
   return groundtruth_list
   
 
-def convert_detections_to_coco_format(image_id,
-                                      category_id_set,
-                                      detection_boxes,
-                                      detection_scores,
-                                      detection_classes):
+def convert_box_detections_to_coco_format(image_id,
+                                          category_id_set,
+                                          detection_boxes,
+                                          detection_scores,
+                                          detection_classes):
   num_boxes = detection_classes.shape[0]
   detections_list = []
   for i in range(num_boxes):
@@ -42,6 +53,23 @@ def convert_detections_to_coco_format(image_id,
         'image_id': image_id,
         'category_id': int(detection_classes[i]),
         'bbox': list(_convert_box_to_coco_format(detection_boxes[i, :])),
+        'score': float(detection_scores[i])})
+  return detections_list
+
+
+def convert_mask_detections_to_coco_format(image_id,
+                                           category_id_set,
+                                           detection_masks,
+                                           detection_scores,
+                                           detection_classes):
+  num_boxes = detection_classes.shape[0] 
+  detections_list = []
+  for i in range(num_boxes):
+    _check_id(detection_classes[i], category_id_set)
+    detections_list.append({
+        'image_id': image_id,
+        'category_id': int(detection_classes[i]),
+        'segmentation': mask.encode(np.asfortranarray(detection_masks[i])), 
         'score': float(detection_scores[i])})
   return detections_list
 

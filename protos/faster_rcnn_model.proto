@@ -8,6 +8,7 @@ import "detection/protos/box_coder.proto";
 import "detection/protos/target_assigner.proto";
 import "detection/protos/losses.proto";
 import "detection/protos/box_predictor.proto";
+import "detection/protos/mask_predictor.proto";
 import "detection/protos/anchor_generator.proto";
 import "detection/protos/image_resizer.proto";
 import "detection/protos/postprocessing.proto";
@@ -29,6 +30,8 @@ message FasterRcnnModel {
 
   optional BoxPredictor frcnn_box_predictor = 7;
 
+  optional MaskPredictor frcnn_mask_predictor = 21;
+
   optional TargetAssigner rpn_target_assigner = 8;
 
   optional TargetAssigner frcnn_target_assigner = 9;
@@ -42,6 +45,8 @@ message FasterRcnnModel {
   optional PostProcessing frcnn_post_processing = 13;
 
   optional int32 rpn_box_predictor_depth = 14 [default = 512];
+
+  optional int32 first_stage_atrous_rate = 22 [default = 1];
 
   optional float rpn_minibatch_positive_fraction = 15 [default = 0.5];
 

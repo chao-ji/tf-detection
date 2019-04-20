@@ -13,7 +13,7 @@ from detection.utils import ops
 
 def postprocess_frcnn(model,
                       frcnn_prediction_dict,
-                      proposal_detection_dict):
+                      rpn_detection_dict):
   """Postprocess output tensors from Fast RCNN.
 
   Box encoding predictions are decoded w.r.t. the proposal boxes predicted
@@ -40,16 +40,16 @@ def postprocess_frcnn(model,
   Returns:
     frcnn_detection_dict: a dict mapping from strings to tensors,
       holding the following entries:
-      { 'detection_boxes': float tensor of shape [batch_size, max_num_boxes, 4].
-        'detection_scores': float tensor of shape [batch_size, max_num_boxes].
-        'detection_classes': int tensor of shape [batch_size, max_num_boxes].
+      { 'boxes': float tensor of shape [batch_size, max_num_boxes, 4].
+        'scores': float tensor of shape [batch_size, max_num_boxes].
+        'classes': int tensor of shape [batch_size, max_num_boxes].
         'num_detections': int tensor of shape [batch_size], holding num of 
           valid (not zero-padded) detections in each of the above tensors.}
   """
   box_encoding_predictions = frcnn_prediction_dict['box_encoding_predictions']
   class_predictions = frcnn_prediction_dict['class_predictions']
-  proposal_boxlist_list = proposal_detection_dict['proposal_boxlist_list']
-  num_proposals = proposal_detection_dict['num_proposals'] 
+  proposal_boxlist_list = rpn_detection_dict['proposal_boxlist_list']
+  num_proposals = rpn_detection_dict['num_proposals'] 
   batch_size = len(proposal_boxlist_list)
 
   with tf.name_scope('SecondStagePostprocessor'):
@@ -109,6 +109,7 @@ def compute_rpn_loss(model, rpn_prediction_dict, gt_boxlist_list):
   with tf.name_scope('RPNLoss'):
     batch_size = len(gt_boxlist_list) 
     rpn_gt_boxlist_list = []
+    # generate objectness labels for rpn_gt_boxlist
     for gt_boxlist in gt_boxlist_list:
       gt_boxlist = box_list.BoxList(gt_boxlist.get())
       gt_boxlist.set_field('labels', 
@@ -116,7 +117,7 @@ def compute_rpn_loss(model, rpn_prediction_dict, gt_boxlist_list):
       rpn_gt_boxlist_list.append(gt_boxlist)
 
     (batch_loc_targets, batch_loc_weights, batch_cls_targets, batch_cls_weights,
-        _) = target_assigner.batch_assign_targets(
+        _, _) = target_assigner.batch_assign_targets(
         model._rpn_target_assigner, anchors_boxlist_list, rpn_gt_boxlist_list)
 
     def rpn_minibatch_subsample_fn(args):
@@ -184,7 +185,7 @@ def compute_frcnn_loss(model,
       list is equal to `batch_size`.
 
   Returns:
-    frcnn_detection_dict: a tensor dict mapping from strings to tensors, holding
+    frcnn_losses_dict: a tensor dict mapping from strings to tensors, holding
       the following entries,
       { 'loc_loss': float scalar tensor, 
           final box localization loss.
@@ -199,6 +200,8 @@ def compute_frcnn_loss(model,
   with tf.name_scope('FastRcnnLoss'):
     if model.is_training:
       def _get_batch_results(field_name):
+        if not proposal_boxlist_list[0].has_field(field_name):
+          return None
         batch_results = tf.stack([proposal_boxlist.get_field(field_name) 
             for proposal_boxlist in proposal_boxlist_list])
         return batch_results
@@ -207,17 +210,20 @@ def compute_frcnn_loss(model,
       batch_loc_weights = _get_batch_results('loc_weights')
       batch_cls_targets = _get_batch_results('cls_targets')
       batch_cls_weights = _get_batch_results('cls_weights')
+      batch_msk_targets = _get_batch_results('msk_targets')
     else:
       (batch_loc_targets, 
        batch_loc_weights, 
        batch_cls_targets, 
        batch_cls_weights,
+       batch_msk_targets,
        _) = target_assigner.batch_assign_targets(model._frcnn_target_assigner, 
                                                  proposal_boxlist_list, 
                                                  gt_boxlist_list)
 
     box_encoding_predictions = tf.pad(
         box_encoding_predictions, [[0, 0], [0, 0], [1, 0], [0, 0]])
+
     box_encoding_predictions = tf.squeeze(
         tf.batch_gather(box_encoding_predictions, 
             tf.expand_dims(
@@ -225,13 +231,17 @@ def compute_frcnn_loss(model,
             axis=2)
         ), axis=2)
 
+    # [batch_size, max_num_proposals] 
     padding_indicator = tf.sequence_mask(num_proposals, 
         model.max_num_proposals, dtype=tf.float32)
+    # true num of proposals (excluding padded ones)
     # make sure `sample_sizes` >= 1 elementwise
     sample_sizes = tf.to_float(tf.maximum(num_proposals, 1))
 
+    # [batch_size, max_num_proposals]
     loc_losses = model._frcnn_localization_loss_fn(box_encoding_predictions,
         batch_loc_targets, weights=batch_loc_weights * padding_indicator)
+    # [batch_size, max_num_proposals]
     cls_losses = model._frcnn_classification_loss_fn(class_predictions,
         batch_cls_targets, weights=batch_cls_weights * padding_indicator)
 
@@ -243,8 +253,20 @@ def compute_frcnn_loss(model,
     cls_loss = tf.multiply(cls_loss, 
         model._frcnn_classification_loss_weight, name='frcnn_cls_loss')
 
-    return {'loc_loss': loc_loss, 'cls_loss': cls_loss}
+    frcnn_losses_dict = {'loc_loss': loc_loss, 'cls_loss': cls_loss}
 
+    if 'mask_predictions' in frcnn_prediction_dict:
+      msk_loss = _compute_mask_loss(model,
+          frcnn_prediction_dict['mask_predictions'],
+          batch_cls_targets,
+          batch_msk_targets,
+          batch_loc_weights,
+          padding_indicator,
+          rpn_detection_dict['proposal_boxlist_list'])
+
+      frcnn_losses_dict['msk_loss'] = msk_loss 
+
+    return frcnn_losses_dict
 
 def prune_outlying_anchors_and_predictions(box_encoding_predictions, 
                                            objectness_predictions, 
@@ -354,7 +376,7 @@ def _sample_frcnn_minibatch_per_image(model,
       proposal boxes sampled from `proposal_boxlist`, where `in_num_boxes` <=
       `out_num_boxes`.
   """
-  (loc_targets, loc_weights, cls_targets, cls_weights, _
+  (loc_targets, loc_weights, cls_targets, cls_weights, msk_targets, _
       ) = model._frcnn_target_assigner.assign(proposal_boxlist, gt_boxlist)
 
   cls_weights += tf.to_float(tf.equal(tf.reduce_sum(cls_weights), 0))
@@ -371,5 +393,160 @@ def _sample_frcnn_minibatch_per_image(model,
   proposal_boxlist.set_field('cls_weights', cls_weights)
   proposal_boxlist.set_field('loc_targets', loc_targets)
   proposal_boxlist.set_field('loc_weights', loc_weights)
+  if msk_targets is not None:
+    proposal_boxlist.set_field('msk_targets', msk_targets)
 
   return box_list_ops.gather(proposal_boxlist, sampled_indices)
+
+
+def _compute_mask_loss(model,
+                       mask_predictions,
+                       batch_cls_targets,
+                       batch_msk_targets,
+                       batch_msk_weights,
+                       padding_indicator,
+                       proposal_boxlist_list):
+  """Compute mask loss.
+  
+  Each proposal (out of `max_num_proposals`) predictes `num_classes` masks of 
+  shape [mask_height, mask_width]. However, only the one corresponding to the
+  groundtruth class label `k` will be "selected" and contribute to the loss.
+ 
+  Note: `batch_num_proposals` = `batch_size` * `max_num_proposals`,
+  e.g. 64 = 1 * 64
+
+  Args:
+    mask_predictions: a float tensor of shape 
+      [batch_num_proposals, num_classes, mask_height, mask_width], holding mask
+      predictions.
+    batch_cls_targets: a float tensor of shape 
+      [batch_size, max_num_proposals, num_classes + 1], containing anchorwise
+      classification targets. 
+    batch_msk_targets: a float tensor of shape 
+      [bathc_size, max_num_proposals, image_height, image_width], containing 
+      instance mask targets. 
+    batch_msk_weights a float tensor of shape [batch_size, max_num_proposals], 
+      containing anchorwise localization weights.
+    padding_indicator: a float tensor of shape [batch_size, max_num_proposals],
+      holding indicator of padded proposals. 
+    proposal_boxlist_list: a list of BoxList instances, each holding 
+      `max_num_proposals` proposal boxes (coordinates normalized). The fields
+      are potentially zero-padded up to `max_num_proposals`. Length of list
+      is equal to `batch_size`.
+
+  Returns:
+    msk_loss: float scalar tensor, mask loss.
+  """
+  (batch_num_proposals, num_classes, mask_height, mask_width
+      ) = shape_utils.combined_static_and_dynamic_shape(mask_predictions)
+  batch_size = len(proposal_boxlist_list)
+
+  # [batch_size * max_num_proposals, 4] e.g. 64, 4
+  proposal_boxes = tf.reshape(tf.stack([proposal_boxlist.get() 
+      for proposal_boxlist in proposal_boxlist_list], axis=0), 
+      [batch_num_proposals, -1])
+  # [batch_size * max_num_proposals, nums_classes + 1, mask_height, mask_width] 
+  # e.g. 64, 91, 33, 33 
+  mask_predictions = tf.pad(mask_predictions, [[0, 0], [1, 0], [0, 0], [0, 0]])
+
+  # Only compute mask loss for the `k`th mask prediction, where `k` is the 
+  # groundtruth
+  # e.g. using class indices [64, 1] to gather from [64, 91, 33, 33], we get
+  # tensor [64, 1, 33, 33]
+  # [batch_size * max_num_proposals, 1, mask_height, mask_width]
+  mask_predictions = tf.batch_gather(
+      mask_predictions, 
+      tf.to_int32(tf.expand_dims(tf.argmax(tf.reshape(batch_cls_targets, 
+          [batch_num_proposals, -1]), axis=1), axis=-1)))
+
+  # [batch_size, max_num_proposals, mask_height * mask_width]
+  # e.g. 1, 64, 33 * 33 
+  mask_predictions = tf.reshape(mask_predictions, 
+                                [batch_size, -1, mask_height * mask_width])
+
+  image_height, image_width = shape_utils.combined_static_and_dynamic_shape(
+      batch_msk_targets)[2:]
+ 
+
+  # [batch_size * max_num_proposals, image_height, image_width]
+  batch_msk_targets = tf.reshape(batch_msk_targets, 
+                                 [-1, image_height, image_width])
+
+  # `batch_msk_targets` contains groundtruth instance masks as FULL SIZE 
+  # images. Now we need to crop patches from it based on predicted region
+  # proposals (i.e. `proposal_boxes`), and resize them to 
+  # [mask_height, mask_width] to match the size of `mask_predictions`.
+  #
+  # [batch_size * max_num_proposals, mask_height, mask_weight, 1]
+  # e.g. 64, 33, 33, 1
+  batch_msk_targets = tf.image.crop_and_resize(
+      tf.expand_dims(batch_msk_targets, -1), 
+      proposal_boxes, 
+      tf.range(batch_num_proposals),
+      [mask_height, mask_width])
+
+  # [batch_size, max_num_proposals, mask_height * mask_width]
+  # e.g. 1, 64, 33 * 33
+  batch_msk_targets = tf.reshape(batch_msk_targets, 
+                                 [batch_size, -1, mask_height * mask_width])
+
+  # [batch_size, max_num_proposals]
+  msk_losses = model._frcnn_mask_loss_fn(
+      mask_predictions, 
+      batch_msk_targets, 
+      weights=batch_msk_weights*padding_indicator)
+
+  # normalize by
+  # 1) mask size (`mask_height` * mask_width)
+  # 2) num of pos proposals (only pos proposals' mask prediction matters)
+  msk_losses = msk_losses / (mask_height * mask_width * tf.maximum(
+      tf.reduce_sum(batch_msk_weights, axis=1, keep_dims=True), 
+      tf.ones((batch_size, 1))))
+  msk_loss = tf.reduce_sum(msk_losses)
+
+  msk_loss = tf.multiply(msk_loss,
+        model._frcnn_mask_loss_weight, name='frcnn_msk_loss')
+
+  return msk_loss
+
+
+def postprocess_masks(mask_predictions, frcnn_detection_dict):
+  """Postprocess_masks to generate mask predictions.
+
+  Each proposal (out of `max_num_proposals`) predictes `num_classes` masks of 
+  shape [mask_height, mask_width]. However, only the one corresponding to the
+  predicted class label `k` will be "selected" and generate a mask detection.
+
+  Args:
+    mask_predictions: a float tensor of shape 
+      [batch_num_proposals, num_classes, mask_height, mask_width] 
+    frcnn_detection_dict: a dict mapping from strings to tensors,
+      holding the following entries:
+      { 'boxes': float tensor of shape [batch_size, max_num_boxes, 4].
+        'scores': float tensor of shape [batch_size, max_num_boxes].
+        'classes': int tensor of shape [batch_size, max_num_boxes].
+        'num_detections': int tensor of shape [batch_size], holding num of 
+          valid (not zero-padded) detections in each of the above tensors.}
+
+  Returns:
+    mask_detections: a float tensor of shape 
+      [batch_size, max_detection, mask_height, mask_width], holding the detected
+      instance masks.
+  """
+  # [batch_size, max_num_proposals] e.g. 1, 300
+  detection_classes = frcnn_detection_dict['classes']
+  # e.g 300, 90, 33, 33 
+  _, num_classes, mask_height, mask_width = mask_predictions.shape.as_list()
+  batch_size, max_detection = detection_classes.get_shape().as_list()
+
+  if num_classes > 1:
+    # e.g. 300, 1, 33, 33
+    mask_detections = tf.batch_gather(mask_predictions,
+        tf.reshape(tf.to_int32(detection_classes) - 1, [-1, 1]))
+
+  # e.g. 1, 300, 33, 33
+  mask_detections = tf.reshape(tf.squeeze(mask_detections, axis=1),
+      [batch_size, max_detection, mask_height, mask_width])
+
+  mask_detections = tf.nn.sigmoid(mask_detections)
+  return mask_detections

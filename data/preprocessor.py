@@ -40,39 +40,65 @@ def _flip_boxes_left_right(boxes):
   return flipped_boxes
 
 
-def random_horizontal_flip(image, boxes, seed=None):
+def _flip_masks_left_right(masks):
+  """Horizontally flips groundtruth masks.
+
+  Args:
+    mask: a tensor of shape [num_boxes, height, width], holding binary masks of
+      `num_boxes` instances.
+
+  Returns:
+    flipped groundtruth masks of the same shape as input.
+  """
+  return masks[:, :, ::-1]
+
+
+def random_horizontal_flip(image, boxes, masks=None, seed=None):
   """Horizontally flips an image together with the associated groundtruth 
-  boxes with 1/2 probability.
+  boxes (and optionally masks) with 1/2 probability.
 
   Args:
     image: a float tensor of shape [height, width, channels].
     boxes: a float tensor of shape [num_boxes, 4], where each row 
       contains normalized (i.e. values varying in [0, 1]) box coordinates: 
       [ymin, xmin, ymax, xmax].
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances.
     seed: int scalar, random seed.
 
   Returns:
     image: flipped or unchanged image of the same shape as input.
     boxes: flipped or unchanged boxes of the same shape as input.
+    masks: (Optional) flipped or unchanged masks of the same shape as input.
   """
   with tf.name_scope('RandomHorizontalFlip', values=[image, boxes]):
     selector = tf.random_uniform([], seed=seed)
     do_a_flip_random = tf.greater(selector, 0.5)
 
-    image, boxes = tf.cond(do_a_flip_random, 
-        lambda: (_flip_image_left_right(image), _flip_boxes_left_right(boxes)),
-        lambda: (image, boxes))
+    funcs = [_flip_image_left_right, _flip_boxes_left_right]
+    tensors = [image, boxes]
+    if masks is not None:
+      funcs.append(_flip_masks_left_right)
+      tensors.append(masks)
 
-    return image, boxes
+    flipped = tf.cond(do_a_flip_random,
+        lambda: tuple(f(t) for f, t in zip(funcs, tensors)),
+        lambda: tuple(tensors))
+
+    return flipped
 
 
-def _strict_pad_image(image, boxes, height, width, value=IMAGENET_MEAN):
-  """Alwasy pad image to the desired height and width uniformly with the given 
+def _strict_pad_image(
+    image, boxes, height, width, masks=None, value=IMAGENET_MEAN):
+  """Always pad image to the desired height and width uniformly with the given 
   pixel value.
   
   First draw a canvas of size [height, width] filled with pixel value `value`,
   and then place the input image in the center, and update the boxes coordinates
-  to the new frame.
+  (and optionally masks) to the new frame.
+
+  NOTE: no padding will be performed in the height and/or width dimension if the
+  desired size is less than that of the image.
 
   Args:
     image: float tensor of shape [height_in, width_in, channels].
@@ -81,15 +107,21 @@ def _strict_pad_image(image, boxes, height, width, value=IMAGENET_MEAN):
       [ymin, xmin, ymax, xmax].
     height: float scalar, the desired height of padded image.
     width: float scalar, the desired width of padded image.
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances.
     value: float tensor of shape [3], RGB value to fill the padded region with.
 
   Returns:
-    new image: float tensor of shape [height, width, channels].
-    new boxes: float tensor of shape [num_boxes, 4].
+    new_image: float tensor of shape [height, width, channels].
+    new_boxes: float tensor of shape [num_boxes, 4].
+    new_masks: (Optional) float tensor of shape [num_boxes, height, width].
   """
   value = tf.to_float(value)
   img_height, img_width, _ = tf.unstack(tf.shape(image))
   img_height, img_width = tf.to_float(img_height), tf.to_float(img_width)
+
+  # no padding in height and/or width dimension if desired height and/or width 
+  # is less than that of the image
   height = tf.maximum(height, img_height)
   width = tf.maximum(width, img_width)
 
@@ -98,30 +130,40 @@ def _strict_pad_image(image, boxes, height, width, value=IMAGENET_MEAN):
   pad_left = (width - img_width) // 2
   pad_right = width - img_width - pad_left
 
+  # pad image
   image -= value
   new_image = tf.pad(image, [[pad_up, pad_down], [pad_left, pad_right], [0, 0]]) 
   new_image += value
 
+  # pad boxes
   window = -pad_up, -pad_left, img_height + pad_down, img_width + pad_right
   normalizer = img_height, img_width, img_height, img_width
   window = tf.to_float(window) / tf.to_float(normalizer)
   new_boxes = box_list_ops.change_coordinate_frame(
       box_list.BoxList(boxes), window).get() 
+
+  # pad masks
+  if masks is not None:
+    new_masks = tf.pad(masks, [[0, 0], [pad_up, pad_down], [pad_left, pad_right]]) 
+    return new_image, new_boxes, new_masks
+
   return new_image, new_boxes
 
 
 def _strict_random_crop_image(image,
                               boxes,
                               labels,
+                              masks=None,
                               min_object_covered=1.0,
                               aspect_ratio_range=(0.75, 1.33),
                               area_range=(0.1, 1.0),
                               overlap_thresh=0.3):
   """Always performs a random crop.
 
-  A random window is cropped out of `image`, and the groundtruth boxes 
-  associated with the original image will be either removed, clipped or retained 
-  as is, depending on their relative location w.r.t. to the crop window.
+  A random window is cropped out of `image`, and the groundtruth boxes (and 
+  optionally the masks) associated with the original image will be either 
+  removed, clipped or retained as is, depending on their relative location 
+  w.r.t. to the crop window.
 
   Note: you may end up getting a cropped image without any groundtruth boxes. If
   that is the case, the output boxes and labels would simply be empty tensors 
@@ -133,6 +175,8 @@ def _strict_random_crop_image(image,
       contains normalized (i.e. values varying in [0, 1]) box coordinates: 
       [ymin, xmin, ymax, xmax].
     labels: int tensor of shape [num_boxes] holding object classes in `boxes`.
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances.
     min_object_covered: float scalar, the cropped window must cover at least 
       `min_object_covered` (ratio) of the area of at least one box in `boxes`.
     aspect_ratio_range: a float 2-tuple, lower and upper bound of the aspect 
@@ -150,6 +194,8 @@ def _strict_random_crop_image(image,
       clipped to the crop window.
     new_labels: int tensor of shape [new_num_boxes] holding object classes in
       `new_boxes`.
+    new_masks: (Optional) float tensor of shape [new_num_boxes, height, width],
+      holding new instance masks corresponding to `new_boxes`.
   """
   with tf.name_scope('RandomCropImage', values=[image, boxes, labels]):
     # crop_box.shape: [1, 1, 4]
@@ -170,11 +216,11 @@ def _strict_random_crop_image(image,
     crop_boxlist = box_list.BoxList(tf.squeeze(crop_box, [0]))
 
     # remove boxes that are completely outside of `window`
-    boxlist, _ = box_list_ops.prune_completely_outside_window(
+    boxlist, indices = box_list_ops.prune_completely_outside_window(
         boxlist, window)
     # remove boxes whose fraction of area that is overlapped with 
     # `crop_boxlist` is less than `overlap_thresh`
-    boxlist, _ = box_list_ops.prune_non_overlapping_boxes(
+    boxlist, in_window_indices = box_list_ops.prune_non_overlapping_boxes(
         boxlist, crop_boxlist, overlap_thresh)
     # change the coordinate of the remaining boxes
     new_boxlist = box_list_ops.change_coordinate_frame(boxlist, window)
@@ -185,21 +231,33 @@ def _strict_random_crop_image(image,
     new_boxes = tf.clip_by_value(new_boxlist.get(),
         clip_value_min=0.0, clip_value_max=1.0)
     new_labels = new_boxlist.get_field('labels')
+
+    if masks is not None:
+      in_window_masks = tf.gather(tf.gather(masks, indices), in_window_indices)
+      new_masks = tf.splice(in_window_masks, 
+                            [0, crop_begin[0], crop_begin[1]], 
+                            [-1, crop_size[0], crop_size[1]])
+      return new_image, new_boxes, new_labels, new_masks
+
     return new_image, new_boxes, new_labels
 
 
-def random_pad_image(image, boxes, pad_ratio=1.0, keep_prob=1.0, seed=None):
+def random_pad_image(
+    image, boxes, masks=None, pad_ratio=1.0, keep_prob=1.0, seed=None):
   """Randomly pad an input image.
 
   This function either pads the image so that `height` and `width` are scaled up
   by a factor of `pad_ratio` with probability `1 - keep_prob`, or return the
-  input `image`, `boxes` unchanged with probability `keep_prob`.
+  input `image`, `boxes` (and optionally masks) unchanged with probability 
+  `keep_prob`.
 
   Args:
     image: a float tensor of shape [height, width, channels].
     boxes: a float tensor of shape [num_boxes, 4], where each row 
       contains normalized (i.e. values varying in [0, 1]) box coordinates: 
       [ymin, xmin, ymax, xmax].
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances. 
     pad_ratio: float scalar >= 1.0, the factor by which the height and width to 
       be scaled up.
     keep_prob: float scalar, the probability to return the original
@@ -209,23 +267,31 @@ def random_pad_image(image, boxes, pad_ratio=1.0, keep_prob=1.0, seed=None):
   Return:
     image: new or original image with same rank as input.
     boxes: new or original boxes with same rank as input.
+    masks: (Optional) new or original masks with same rank as input.
   """
-  print('\n\n\n', 'pad_ratio', pad_ratio, 'keep_prob', keep_prob, '\n\n\n\n\n')
   selector = tf.random_uniform([], seed=seed)
   do_random_pad = tf.greater(selector, keep_prob)
 
   height, width, _ = tf.unstack(tf.shape(image))
   height, width = tf.to_float(height), tf.to_float(width)
-  image, boxes = tf.cond(do_random_pad, 
-      lambda: _strict_pad_image(
-          image, boxes, height * pad_ratio, width * pad_ratio),
-      lambda: (image, boxes))
-  return image, boxes
+
+  tensors = [image, boxes]
+  args = [image, boxes, height * pad_ratio, width * pad_ratio]
+  if masks is not None:
+    tensors.append(masks)
+    args.append(masks)
+
+  result = tf.cond(do_random_pad, 
+                   lambda: _strict_pad_image(*args), 
+                   lambda: tensors)
+
+  return result
 
 
 def random_crop_image(image,
                       boxes,
                       labels,
+                      masks=None,
                       min_object_covered=1.0,
                       aspect_ratio_range=(0.75, 1.33),
                       area_range=(0.1, 1.0),
@@ -235,8 +301,8 @@ def random_crop_image(image,
   """Randomly crops an image and associated groundtruth boxes.
   
   This function either performs a crop by `_strict_random_crop_image` with 
-  probability `1 - keep_prob` or return the input `image`, `boxes`,
-  and `labels` unchanged with probability `keep_prob`.  
+  probability `1 - keep_prob` or return the input `image`, `boxes` (and 
+  optionally masks), and `labels` unchanged with probability `keep_prob`.  
 
   Note: you may end up getting a cropped image without any groundtruth boxes. If
   that is the case, the output boxes and labels would simply be empty tensors 
@@ -248,6 +314,8 @@ def random_crop_image(image,
       contains normalized (i.e. values varying in [0, 1]) box coordinates: 
       [ymin, xmin, ymax, xmax].
     labels: int tensor of shape [num_boxes] holding object classes in `boxes`. 
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances.
     min_object_covered: float scalar, the cropped window must cover at least 
       `min_object_covered` (ratio) of the area of at least one box in `boxes`.
     aspect_ratio_range: a float 2-tuple, lower and upper bound of the aspect 
@@ -264,25 +332,32 @@ def random_crop_image(image,
     image: new or original image with same rank as input.
     boxes: new or original boxes with same rank as input.
     labels: labels associated with output `boxes` with same rank as input.
+    masks: (Optional) new or original boxes with same rank as input. 
   """
   selector = tf.random_uniform([], seed=seed)
   do_a_crop_random = tf.greater(selector, keep_prob)
+
+  tensors = [image, boxes, labels]
+  if masks is not None:
+    tensors.append(masks)
 
   result = tf.cond(do_a_crop_random,
       lambda: _strict_random_crop_image(image,
                                         boxes,
                                         labels,
+                                        masks,
                                         min_object_covered,
                                         aspect_ratio_range,
                                         area_range,
                                         overlap_thresh),
-      lambda: (image, boxes, labels))
+      lambda: tuple(tensors))
   return result
 
 
 def ssd_random_crop(image,
                     boxes,
                     labels,
+                    masks=None,
                     min_object_covered=(0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0),
                     aspect_ratio_range=((0.5, 2.0),) * 7,
                     area_range=((0.1, 1.0),) * 7,
@@ -302,6 +377,8 @@ def ssd_random_crop(image,
       contains normalized (i.e. values varying in [0, 1]) box coordinates: 
       [ymin, xmin, ymax, xmax].
     labels: int tensor of shape [num_boxes] holding object classes in `boxes`. 
+    masks: (Optional) a tensor of shape [num_boxes, height, width], holding 
+      binary masks of `num_boxes` instances.
     min_object_covered: tuple of float scalars, the cropped window must cover at 
       least `min_object_covered` (ratio) of the area of at least one box in 
       `boxes`.
@@ -319,6 +396,7 @@ def ssd_random_crop(image,
     image: new or original image with same rank as input.
     boxes: new or original boxes with same rank as input.
     labels: labels associated with output `boxes` with same rank as input.
+    masks: (Optional) new or original masks with same rank as input.
   """
   num_cases = len(min_object_covered)
   selector = tf.random_uniform([], maxval=num_cases, dtype=tf.int32, 
@@ -330,6 +408,7 @@ def ssd_random_crop(image,
                         image=image,
                         boxes=boxes,
                         labels=labels,
+                        masks=masks,
                         min_object_covered=min_object_covered[case],
                         aspect_ratio_range=aspect_ratio_range[case],
                         area_range=area_range[case],
@@ -344,14 +423,16 @@ def ssd_random_crop(image,
 
 
 def resize_image(image,
+                 masks=None,
                  new_height=512,
                  new_width=512,
                  method=tf.image.ResizeMethod.BILINEAR,
                  align_corners=False):
-  """Resizes images to the given height and width.
+  """Resizes images (and optionally masks) to the given height and width.
 
   Args:
     image: a float tensor of shape [height, width, channels].
+    masks: a float tensor of shape [num_boxes, height, width].
     new_height: int scalar, desired height of the image.
     new_width: int scalar, desired width of the image.
     method: interpolation method used in resizing. Defaults to BILINEAR.
@@ -361,20 +442,43 @@ def resize_image(image,
   Returns:
     new_image: float tensor of shape [new_height, new_width, channels] holding
       resized image.
+    new_masks: (Optional) float tensor of shape 
+      [num_boxes, new_height, new_width] holding resized masks. 
   """
   with tf.name_scope(
       'ResizeImage',
       values=[image, new_height, new_width, method, align_corners]):
     new_image = tf.image.resize_images(
-        image, tf.stack([new_height, new_width]), 
+        image, [new_height, new_width], 
         method=method,
         align_corners=align_corners)
-    return new_image
+
+    result = [new_image]
+
+    if masks is not None:
+      num_boxes = tf.shape(masks)[0]
+     
+      # resize masks with > 0 instances
+      def resize_non_empty():
+        new_masks = tf.expand_dims(masks, 3)
+        new_masks = tf.image.resize_nearest_neighbor(
+            new_masks, [new_height, new_width], align_corners=align_corners)
+        return tf.squeeze(new_masks, axis=3)
+
+      # resize masks with 0 instances
+      def resize_empty():
+        return tf.reshape(masks, [-1, new_height, new_width])
+
+      new_masks = tf.cond(tf.greater(num_boxes, 0), resize_non_empty, resize_empty)
+      result.append(new_masks)
+
+    return result
 
 
 def rescale_image(image,
-                  min_dimension,
-                  max_dimension,
+                  masks=None,
+                  min_dimension=600,
+                  max_dimension=1024,
                   method=tf.image.ResizeMethod.BILINEAR,
                   align_corners=False):
   """Resize image by rescaling (aspect ratio unchanged).
@@ -387,6 +491,8 @@ def rescale_image(image,
 
   Args:
     image: a float tensor of shape [height, width, channels].
+    masks: a tensor of shape [num_boxes, height, width], holding binary masks of
+      `num_boxes` instances. 
     min_dimension: int scalar, the desired size of the smaller dimension. 
     max_dimension: int scalar, the upper bound of the size of the larger 
       dimension.
@@ -397,6 +503,8 @@ def rescale_image(image,
   Returns:
     new_image: float tensor of shape [new_height, new_width, channels] holding
       resized image.
+    new_masks: (Optional) float tensor of shape [num_boxes, new_height, 
+      new_width] holding resized masks.
   """  
   with tf.name_scope('ResizeToRange', 
       values=[image, min_dimension, max_dimension]):
@@ -419,7 +527,17 @@ def rescale_image(image,
     new_image = tf.image.resize_images(
         image, new_size, method=method, align_corners=align_corners)
 
-    return new_image
+    if masks is not None:
+      new_masks = tf.expand_dims(masks, 3)
+      new_masks = tf.image.resize_images(
+          new_masks, 
+          new_size, 
+          method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+          align_corners=align_corners)
+      new_masks = tf.squeeze(new_masks, 3)
+      return new_image, new_masks
+    else:
+      return new_image
 
 
 def _get_fn_args_map():
@@ -429,22 +547,22 @@ def _get_fn_args_map():
   fn_args_map = {
       random_horizontal_flip: (
           names.TensorDictFields.image,
-          names.TensorDictFields.groundtruth_boxes),
+          names.TensorDictFields.groundtruth_boxes,
+          names.TensorDictFields.groundtruth_masks),
       random_crop_image: (
           names.TensorDictFields.image,
           names.TensorDictFields.groundtruth_boxes,
-          names.TensorDictFields.groundtruth_labels),
+          names.TensorDictFields.groundtruth_labels,
+          names.TensorDictFields.groundtruth_masks),
       random_pad_image: (
           names.TensorDictFields.image,
-          names.TensorDictFields.groundtruth_boxes),
+          names.TensorDictFields.groundtruth_boxes,
+          names.TensorDictFields.groundtruth_masks),
       ssd_random_crop: (
           names.TensorDictFields.image,
           names.TensorDictFields.groundtruth_boxes,
-          names.TensorDictFields.groundtruth_labels),
-#      resize_image: (
-#          names.TensorDictFields.image,),
-#      rescale_image: (
-#          names.TensorDictFields.image,),
+          names.TensorDictFields.groundtruth_labels,
+          names.TensorDictFields.groundtruth_masks),
   }
   return fn_args_map
 
@@ -496,11 +614,11 @@ class DataPreprocessor(object):
     for fn, kwargs in self._options_list:
       arg_names = fn_args_map[fn]
 
-      args = [tensor_dict[arg_name] for arg_name in arg_names]
+      args = [tensor_dict[arg_name] if arg_name in tensor_dict else None 
+          for arg_name in arg_names]
 
       results = fn(*args, **kwargs)
       for arg_name, result in zip(arg_names, results):
         tensor_dict[arg_name] = result
 
     return tensor_dict
-

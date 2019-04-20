@@ -10,8 +10,10 @@ from detection.protos import test_config_pb2
 from detection.protos import label_map_pb2
 from detection.core import box_list
 from detection.core import box_list_ops
+from detection.utils import ops
 
 from detection.core.standard_names import DetTensorDictFields
+from detection.core.standard_names import TensorDictFields
 
 
 def print_evaluation_metrics(
@@ -44,7 +46,8 @@ def print_evaluation_metrics(
         continue
       print('PascalBoxes_PerformanceByCategory/AP@0.5IOU/{} {}'.format(
           label_map[i + 1], APs[i + 1]))
-  elif metrics_name == 'coco_detection_metrics':
+  elif (metrics_name == 'coco_box_detection_metrics' or 
+      metrics_name == 'coco_mask_detection_metrics'):
     metrics = metrics_calculator.calculate_metrics()
     print()
     for k, v in metrics.items():
@@ -157,32 +160,45 @@ def check_dataset_mode(model, dataset):
         .format(dataset.mode, model.mode))
 
 
-def preprocess_groundtruth(
-    gt_boxes_list, 
-    gt_labels_list, 
-    labels_field_name='labels'):
-  """Package the groundtruth labels tensor and boxes tensor as a BoxList.
+def preprocess_groundtruth(tensor_dict):
+  """Package the groundtruth labels tensor and boxes tensor (and optionally 
+  masks)as a BoxList.
 
   Args:
-    gt_boxes_list: a list of float tensors of shape [num_gt_boxes, 4], holding
-      groundtruth boxes cooridnates. Length is equal to `batch_size`.
-    gt_labels_list: a list of float tensors of shape 
-      [num_gt_boxes, num_class + 1], holding groundtruth boxes class labels 
-      (one-hot encoded). Length is equal to `batch_size`.
-    labels_field_name: string scalar, field name of labels in a BoxList.
+    tensor_dict: a dict mapping from tensor names to list of tensors:
+      { 'image': list of tensors of shape [height, width, channels],
+        'groundtruth_boxes': list of tensors of shape [num_gt_boxes, 4],
+        'groundtruth_labels': list of tensors of shape [num_gt_boxes] or
+        [num_gt_boxes, num_classes],
+        'groundtruth_masks': (Optional) list of tensors of shape 
+          [num_gt_boxes, height, width] }
+        Length of list is equal to batch size.
 
   Returns:
     gt_boxlist_list: a list of BoxList instance holding `num_gt_boxes` 
-      groundtruth boxes with extra field 'labels'.
+      groundtruth boxes with extra field 'labels' (and optionally 'masks').
   """
+  gt_boxes_list = tensor_dict[TensorDictFields.groundtruth_boxes]
+  gt_labels_list = tensor_dict[TensorDictFields.groundtruth_labels]
+  gt_masks_list = None
+  if TensorDictFields.groundtruth_masks in tensor_dict:
+    gt_masks_list = tensor_dict[TensorDictFields.groundtruth_masks]
+
   if len(gt_boxes_list) != len(gt_labels_list):
     raise ValueError('`gt_boxes_list` must have the same length of '
         '`gt_labels_list`.')
+  if gt_masks_list is not None and len(gt_masks_list) != len(gt_boxes_list):
+    raise ValueError('`gt_masks_list` must have the same length of '
+        '`gt_boxes_list`.')
+  gt_masks_list = gt_masks_list or [None] * len(gt_boxes_list)
 
   gt_boxlist_list = []
-  for gt_boxes, gt_labels in zip(gt_boxes_list, gt_labels_list):
+  for gt_boxes, gt_labels, gt_masks in zip(
+      gt_boxes_list, gt_labels_list, gt_masks_list):
     gt_boxlist = box_list.BoxList(gt_boxes)
-    gt_boxlist.set_field(labels_field_name, gt_labels)
+    gt_boxlist.set_field('labels', gt_labels)
+    if gt_masks is not None:
+      gt_boxlist.set_field('masks', gt_masks)
     gt_boxlist_list.append(gt_boxlist)
   return gt_boxlist_list
 
@@ -199,11 +215,13 @@ def process_per_image_detection(image_list,
       is equal to `batch_size`.
     detection_dict: a dict mapping from strings to tensors, holding the 
       following entries:
-      { 'boxes': float tensor of shape [batch_size, max_num_boxes, 4].
-        'scores': float tensor of shape [batch_size, max_num_boxes].
-        'classes': float tensor of shape [batch_size, max_num_boxes].
+      { 'boxes': float tensor of shape [batch_size, max_num_proposals, 4].
+        'scores': float tensor of shape [batch_size, max_num_proposals].
+        'classes': float tensor of shape [batch_size, max_num_proposals].
         'num_detections': int tensor of shape [batch_size], holding num of
           valid (not zero-padded) detections in each of the above tensors.}
+        'masks': (Optional) float tensor of shape 
+          [batch_size, max_num_proposals, mask_height, mask_width].
     gt_boxlist_list: a list of BoxList instances, each holding `num_gt_boxes`
       groundtruth_boxes, with extra field 'labels' holding float tensor of shape
       [num_gt_boxes, num_classes + 1] (groundtruth boxes labels). Length of 
@@ -245,6 +263,14 @@ def process_per_image_detection(image_list,
   boxes, classes, scores = (
       boxes[:num_detections], classes[:num_detections], scores[:num_detections])
   height, width = tf.unstack(tf.shape(image)[:2])
+
+  if 'masks' in detection_dict:
+    # [max_num_proposals, mask_height, mask_width]
+    masks = detection_dict['masks'][0][:num_detections]
+
+    image_size_masks = ops.to_image_size_masks(masks, boxes, height, width)
+    image_size_masks = tf.cast(image_size_masks > 0.5, tf.uint8)
+
   boxes = box_list_ops.to_absolute_coordinates(
       box_list.BoxList(boxes), height, width).get()
 
@@ -252,6 +278,8 @@ def process_per_image_detection(image_list,
                            'boxes': boxes, 
                            'scores': scores,
                            'classes': classes} 
+  if 'masks' in detection_dict:
+    to_be_run_tensor_dict['masks'] = image_size_masks
 
   if gt_boxlist_list is not None:
     gt_boxlist = gt_boxlist_list[0]
@@ -262,6 +290,9 @@ def process_per_image_detection(image_list,
         gt_boxlist.get_field('labels'), axis=1, output_type=tf.int32)
     to_be_run_tensor_dict['gt_boxes'] = gt_boxes
     to_be_run_tensor_dict['gt_labels'] = gt_labels
+    if gt_boxlist.has_field('masks'):
+      to_be_run_tensor_dict['gt_masks'] = gt_boxlist.get_field('masks') 
+
   return to_be_run_tensor_dict
  
 

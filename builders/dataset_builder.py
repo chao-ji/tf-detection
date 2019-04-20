@@ -68,13 +68,13 @@ def _build_trainer_dataset(config,
       preprocessor=preprocessor,
       num_classes=num_classes,
       shuffle=config.shuffle,
-      filename_dataset_shuffle_buffer_size=(
-          config.filename_dataset_shuffle_buffer_size),
-      record_dataset_shuffle_buffer_size=(
-          config.record_dataset_shuffle_buffer_size),
+      reader_buffer_size=config.reader_buffer_size,
+      shuffle_buffer_size=config.shuffle_buffer_size,
       random_seed=config.random_seed,
       num_readers=config.num_readers,
-      read_block_length=config.read_block_length)
+      bucketed_batching=config.bucketed_batching,
+      height_boundaries=list(config.height_boundaries),
+      width_boundaries=list(config.width_boundaries))
 
   return trainer_dataset
 

@@ -92,14 +92,15 @@ def balanced_subsample(indicator, sample_size, labels, pos_frac=0.5, seed=None):
 
   Given `indicator = [0, 1, 1, 0, 1, 0, 0, 1, 1, 1]`,
            `labels = [0, 1, 0, 0, 0, 0, 0, 1, 0, 1]`,
-         `pos_frac = 0.5`, and `sample_size = 5` the
-    output might be [0, 0, 1, 0, 1, 0, 0, 1, 1, 1], where 2, 4, 8 are negatives 
+         `pos_frac = 0.5`, and `sample_size = 5` 
+  
+  `indicator` indicates that elements 1, 2, 4, 7, 8, 9 are candidates. One 
+  output might be [0, 0, 1, 0, 1, 0, 0, 1, 1, 1], where 2, 4, 8 are negatives 
   and 7, 9 are positives. so positive fraction = 2 / 5 <= 0.5
   
-
   Args:
     indicator: bool tensor of shape [batch_size] where only True elements 
-      are to be sampled from.
+      are to be sampled.
     sample_size: int scalar, num of samples to be drawn from `indicator`.
     labels: bool tensor of shape [batch_size], holding binary class labels.
     pos_frac: float scalar, fraction of positives of the entire sample.
@@ -166,3 +167,97 @@ def create_gradient_update_op(optimizer,
   grouped_update_op = tf.group(*update_ops, name='update_barrier')
 
   return grouped_update_op
+
+
+def to_image_size_masks(masks, boxes, image_height, image_width):
+  """Transform box-size instance masks to image-size instance masks.
+  
+  As shown below, the small box represent box-size instance mask, i.e. 
+  `masks[i, :, :]`, while the large box represent image-size instance mask.
+
+
+    A---------------------+
+    |                     |
+    |     a---+           |
+    |     |   |           |
+    |     |   |           |
+    |     |   |           |
+    |     +---b           |
+    +---------------------B
+
+  The coordinates of `a`, `b`, `A`, `B` are 
+
+  a: ymin, xmin
+  b: ymax, xmax
+  A: YMIN, XMIN
+  B: YMAX, XMAX
+
+  `ymin`, `xmin`, `ymax`, `xmax` are rows of `boxes`, and they vary in [0, 1],
+  and are relative to the full-image box [0, 0, 1, 1].
+
+  We need to scale the y and x coordinates such that 
+  1. the full-image box [0, 0, 1, 1] becomes `YMIN`, `XMIN`, `YMAX`, `XMAX`
+  2. `ymin`, `xmin`, `ymax`, `xmax` becomes [0, 0, 1, 1]
+  3. the large box has absolute size `[image_height, image_width]`
+
+  We can use the built-in function `tf.image.crop_and_resize` in which the 
+  rows of `boxes` argument contain `[YMIN, XMIN, YMAX, XMAX]` that we need to 
+  compute.
+
+              small box                   large box
+  original    ymin  xmin  ymax  xmax      0     0     1     1
+  new         0     0     1     1         YMIN  XMIN  YMAX  XMAX
+
+  The original-to-new transformation scales the y and x coordinates, with ratio
+  `k_y = 1/(ymax - ymin)`, `k_x = 1/(xmax - xmin)` 
+
+  we have
+
+  (ymin - 0) k_y = 0 - YMIN           (xmin - 0) k_x = 0 - XMIN
+  (ymax - 1) k_y = 1 - YMAX           (xmax - 1) k_x = 1 - XMAX
+
+  So
+
+  YMIN = - ymin / (ymax - ymin)
+  XMIN = - xmin / (xmax - xmin)
+  YMAX = (1 - ymin) / (ymax - ymin)
+  XMAX = (1 - xmin) / (xmax - xmin) 
+
+
+  Args:
+    masks: a float tensor of shape [max_num_proposals, mask_height, mask_width],
+      holding box-size instance masks for a single image.
+    boxes: a float tensor of shape [max_num_proposals, 4], holding refined 
+      proposal boxes.
+    image_height: int scalar tensor, image height.
+    image_width: int scalar tensor, image width.
+
+  Returns:
+    masks: a float tensor of shape [num_boxes, image_height, image_width, 1], 
+      holding image-size instance masks.
+  """
+  num_boxes = tf.shape(masks)[0]
+
+  def non_empty_masks(masks):
+    masks = tf.expand_dims(masks, axis=3)
+    
+    ymin, xmin, ymax, xmax = tf.unstack(boxes, axis=-1) 
+    height = ymax - ymin
+    width = xmax - xmin
+
+    reframed_boxes = (tf.stack([-ymin, -xmin, 1 - ymin, 1 - xmin ], axis=1) / 
+        tf.stack([height, width, height, width], axis=1))
+
+    return tf.image.crop_and_resize(
+        image=masks, 
+        boxes=reframed_boxes, 
+        box_ind=tf.range(num_boxes), 
+        crop_size=[image_height, image_width], 
+        extrapolation_value=0.0)
+
+  def empty_masks():
+    return tf.zeros([0, image_height, image_width, 1], dtype=tf.float32) 
+
+  masks = tf.squeeze(tf.cond(num_boxes > 0, 
+      lambda: non_empty_masks(masks), empty_masks), axis=3)
+  return masks

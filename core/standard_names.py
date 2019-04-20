@@ -5,6 +5,7 @@ class TensorDictFields(object):
   image = 'image'
   groundtruth_boxes = 'groundtruth_boxes'
   groundtruth_labels = 'groundtruth_labels'
+  groundtruth_masks = 'groundtruth_masks'
   runtime_shape_str = '_runtime_shape'
 
 
@@ -15,6 +16,7 @@ class TfRecordFields(object):
   object_bbox_xmin = 'image/object/bbox/xmin'
   object_bbox_ymax = 'image/object/bbox/ymax'
   object_bbox_xmax = 'image/object/bbox/xmax'
+  object_mask = 'image/object/mask'
 
 
 class BoxListFields(object):

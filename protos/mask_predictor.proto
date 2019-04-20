@@ -1,0 +1,26 @@
+syntax = "proto2";
+
+package detection.protos;
+
+import "detection/protos/conv_hyperparams.proto";
+
+message MaskPredictor {
+  oneof mask_predictor_oneof {
+    RcnnMaskPredictor rcnn_mask_predictor = 1;
+  }
+}
+
+message RcnnMaskPredictor {
+
+  optional ConvHyperparams conv_hyperparams = 1;
+
+  optional int32 num_masks = 2;
+
+  optional int32 mask_height = 3;
+
+  optional int32 mask_width = 4;
+
+  optional int32 num_conv_layers = 5;
+
+  optional int32 depths = 6;
+}

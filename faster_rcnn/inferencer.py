@@ -22,6 +22,7 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
                rpn_anchor_generator,
                rpn_box_predictor,
                frcnn_box_predictor,
+               frcnn_mask_predictor,
 
                frcnn_nms_fn, 
                frcnn_score_conversion_fn,
@@ -29,7 +30,8 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
                rpn_score_conversion_fn,
 
                proposal_crop_size,
-               rpn_box_predictor_depth):
+               rpn_box_predictor_depth,
+               first_stage_atrous_rate):
     """Constructor.
 
     Args:
@@ -46,6 +48,8 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
         predictions and class score predictions for RPN.
       frcnn_box_predictor: an instance of BoxPredictor. Generates box encoding
         predictions and class score predictions for Fast RCNN.
+      frcnn_mask_predictor: an instance of MaskPredictor. Generates mask 
+        predictions for Fast RCNN.
 
       frcnn_nms_fn: a callable that performs NMS on the box coordinate 
         predictions from Fast RCNN.
@@ -69,12 +73,14 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
         rpn_anchor_generator=rpn_anchor_generator,
         rpn_box_predictor=rpn_box_predictor,
         frcnn_box_predictor=frcnn_box_predictor,
+        frcnn_mask_predictor=frcnn_mask_predictor,
 
         rpn_nms_fn=rpn_nms_fn,
         rpn_score_conversion_fn=rpn_score_conversion_fn,
 
         proposal_crop_size=proposal_crop_size,
-        rpn_box_predictor_depth=rpn_box_predictor_depth)
+        rpn_box_predictor_depth=rpn_box_predictor_depth,
+        first_stage_atrous_rate=first_stage_atrous_rate)
 
     self._frcnn_nms_fn = frcnn_nms_fn
     self._frcnn_score_conversion_fn = frcnn_score_conversion_fn
@@ -125,6 +131,16 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
 
     frcnn_detection_dict = commons.postprocess_frcnn(
         self, frcnn_prediction_dict, rpn_detection_dict)
+
+    if self._frcnn_mask_predictor is not None:
+      mask_predictions = self.predict_masks(
+          frcnn_prediction_dict,
+          rpn_detection_dict,
+          rpn_prediction_dict['shared_feature_map'])
+      frcnn_detection_dict['masks_predictions'] = mask_predictions
+
+      mask_detections = commons.postprocess_masks(mask_predictions, frcnn_detection_dict)
+      frcnn_detection_dict['masks'] = mask_detections
 
     to_be_run_tensor_dict = misc_utils.process_per_image_detection(
         image_list, frcnn_detection_dict)

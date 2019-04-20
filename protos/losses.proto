@@ -7,11 +7,15 @@ message Loss {
 
   optional LocalizationLoss localization_loss = 2;
 
+  optional ClassificationLoss mask_loss = 6;
+
   optional HardExampleMiner hard_example_miner = 3;
 
   optional float classification_weight = 4 [default = 1.0];
 
   optional float localization_weight = 5 [default = 1.0]; 
+
+  optional float mask_weight = 7 [default = 1.0];
 }
 
 message ClassificationLoss {

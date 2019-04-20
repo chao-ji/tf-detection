@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
+import PIL.ImageColor as ImageColor
 
 TEXT_COLOR = 255, 255, 255
 
@@ -13,7 +14,8 @@ def visualize_detections(detection_result,
                          font_size=10,
                          line_width=1,
                          score_thresh=.5,
-                         max_num_viz=None):
+                         max_num_viz=None,
+                         color_per_instance_mask=True):
   """Draw detected boxes in the input image, annotated with class and 
   confidence score.
 
@@ -32,6 +34,8 @@ def visualize_detections(detection_result,
     score_thresh: float scalar, only detections with score >= `score_thresh`
       will be drawn.
     max_num_viz: int scalar, max num of boxes to be visualized.
+    color_per_instance_mask: bool scalar, whether to assign a distinct color
+      per instance mask. Defaults to True.
 
   Returns:
     image: uint8 numpy array of shape [height, width, depth], same as input
@@ -49,12 +53,17 @@ def visualize_detections(detection_result,
   boxes = boxes[detection_indices]
   classes = classes[detection_indices]
 
+  masks = None
+  if 'masks' in detection_result:
+    masks = detection_result['masks']
+    masks = masks[detection_indices]
+
   num_detections = scores.shape[0]
   if max_num_viz is not None:
     num_detections = np.minimum(num_detections, max_num_viz)
  
   color_map = get_color_map(len(label_map) + 1)
- 
+
   for i in range(num_detections):
     ymin, xmin, ymax, xmax = boxes[i].astype(np.int32)
     ymin = np.maximum(0, ymin)
@@ -62,6 +71,12 @@ def visualize_detections(detection_result,
     ymax = np.minimum(height - 1, ymax)
     xmax = np.minimum(width - 1, xmax)
     color = color_map[classes[i]]
+    if color_per_instance_mask:
+      mask_color = (color_map[i] + 10) % color_map.shape[0]
+      if (mask_color[0] < 50).all(): 
+        mask_color = (color_map[i] + 15) % color_map.shape[0]
+    else:
+      mask_color = color
 
     image[ymin : ymax, 
           np.maximum(xmin - line_width // 2, 0) : 
@@ -96,6 +111,9 @@ def visualize_detections(detection_result,
     draw.text((x, y), detection_label_text, TEXT_COLOR, font=font)
     image = np.array(img_obj)
 
+    if masks is not None:
+      draw_mask(image, masks[i], color=mask_color)
+
   return image
 
 
@@ -129,3 +147,15 @@ def get_color_map(num_colors=256, normalized=False):
 
   color_map = color_map/255 if normalized else color_map
   return color_map
+
+
+def draw_mask(image, mask, color, alpha=0.7):
+
+  pil_image = Image.fromarray(image)
+
+  solid_color = np.expand_dims(
+      np.ones_like(mask), axis=2) * np.reshape(list(color), [1, 1, 3])
+  pil_solid_color = Image.fromarray(np.uint8(solid_color)).convert('RGBA')
+  pil_mask = Image.fromarray(np.uint8(255. * alpha * mask)).convert('L')
+  pil_image = Image.composite(pil_solid_color, pil_image, pil_mask)
+  np.copyto(image, np.array(pil_image.convert('RGB')))

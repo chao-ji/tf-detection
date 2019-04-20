@@ -4,6 +4,8 @@ package detection.protos;
 
 message DataDecoder {
   repeated KeysToFeaturesItem keys_to_features = 1;
+
+  optional bool load_masks = 2 [default = false];
 }
 
 message KeysToFeaturesItem {

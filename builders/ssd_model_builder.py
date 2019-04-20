@@ -69,8 +69,8 @@ def build_ssd_train_session(model_config,
   target_assigner = target_assigner_builder.build(model_config.target_assigner,
                                                   box_coder=box_coder)
 
-  (localization_loss_fn, classification_loss_fn,
-   localization_loss_weight, classification_loss_weight,
+  (localization_loss_fn, classification_loss_fn, _,
+   localization_loss_weight, classification_loss_weight, _,
    hard_example_miner) = losses_builder.build(model_config.loss)
 
 #  normalize_loss_by_num_matches = model_config.normalize_loss_by_num_matches
@@ -145,8 +145,8 @@ def build_ssd_evaluate_session(model_config,
   target_assigner = target_assigner_builder.build(model_config.target_assigner,
                                                   box_coder=box_coder)
 
-  (localization_loss_fn, classification_loss_fn,
-   localization_loss_weight, classification_loss_weight,
+  (localization_loss_fn, classification_loss_fn, _,
+   localization_loss_weight, classification_loss_weight, _,
    hard_example_miner) = losses_builder.build(model_config.loss)
   non_max_suppression_fn, score_converter_fn = postprocessing_builder.build(
       model_config.post_processing)

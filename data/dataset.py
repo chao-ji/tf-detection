@@ -7,7 +7,8 @@ import tensorflow as tf
 
 from detection.utils import dataset_utils as utils
 from detection.core.standard_names import ModeKeys
-
+from detection.core.standard_names import TensorDictFields
+ 
 
 class DetectionDataset(object):
   """Abstract base class for detection dataset.
@@ -67,7 +68,10 @@ class DetectionDataset(object):
 
   def _train_eval_get_tensor_dict_from_record_dataset(self,
                                                       record_dataset,
-                                                      batch_size):
+                                                      batch_size,
+                                                      bucketed_batching=False,
+                                                      height_boundaries=(),
+                                                      width_boundaries=()):
     """Generates a tensor dict from a record dataset.
 
     It transforms a dataset holding TFRecords into one holding
@@ -76,61 +80,66 @@ class DetectionDataset(object):
 
     Args:
       record_dataset: tf.data.Dataset holding tfrecords (scalar string tensors).
-      batch_size: int scalar, batch size. 
+      batch_size: int scalar, batch size.
+      bucketed_batching: bool scalar, whether to group tensors into buckets
+         based on image spatial dimensions before batching. Defaults to False.
+      height_boundaries: list or tuple of increasing int scalars, bucket 
+        boundaries of heights. Ignored if `bucketed_batching` is False.
+      width_boundaries: list or tuple of increasing int scalars, bucket
+        boundaries of widths.Ignored if `bucketed_batching` is False.
 
     Returns:
       tensor_dict: a dict mapping from tensor names to list of tensors:
-        { 'images': list of tensors of shape [height, width, channels],
+        { 'image': list of tensors of shape [height, width, channels],
           'groundtruth_boxes': list of tensors of shape [num_gt_boxes, 4],
           'groundtruth_labels': list of tensors of shape [num_gt_boxes] or
-          [num_gt_boxes, num_classes] }
+          [num_gt_boxes, num_classes],
+          'groundtruth_masks': (Optional) list of tensors of shape 
+            [num_gt_boxes, height, width] }
         Length of list is equal to batch size.
     """
     if self.mode != ModeKeys.train and self.mode != ModeKeys.eval:
       raise ValueError('For `TrainerDataset` and `EvaluatorDataset` ONLY.')
 
-#    print('\n', record_dataset, '\n')
-
     tensor_dict_dataset = record_dataset.map(
         lambda protobuf_str: self._decoder.decode(protobuf_str))
-
-#    print('\n', tensor_dict_dataset, '\n')
 
     tensor_dict_dataset = tensor_dict_dataset.map(
         lambda tensor_dict: (self._preprocessor.preprocess(tensor_dict)
             if self._preprocessor is not None else tensor_dict))
 
-#    print('\n', tensor_dict_dataset, '\n')
-
     static_shapes = tensor_dict_dataset.output_shapes
-
-#    print('\n', static_shapes, '\n')
 
     tensor_dict_dataset = tensor_dict_dataset.map(
         lambda tensor_dict: utils.add_runtime_shapes(tensor_dict))
 
-#    print('\n', tensor_dict_dataset, '\n')
-
-    tensor_dict_dataset = tensor_dict_dataset.padded_batch(batch_size, 
-        padded_shapes=tensor_dict_dataset.output_shapes, drop_remainder=True)
-
-#    print('\n', tensor_dict_dataset, '\n')
+    if bucketed_batching:
+      tensor_dict_dataset = utils.image_size_bucketed_batching(
+          tensor_dict_dataset,
+          batch_size,
+          height_boundaries,
+          width_boundaries)
+    else:
+      tensor_dict_dataset = tensor_dict_dataset.padded_batch(batch_size, 
+          padded_shapes=tensor_dict_dataset.output_shapes, drop_remainder=True)
 
     iterator = tensor_dict_dataset.make_one_shot_iterator()
     tensor_dict = iterator.get_next()
 
-#    print('\n', tensor_dict, '\n')
-
+    # We will unpad all tensors EXCEPT the image tensors and mask tensors (if
+    # not None), because they will later be stacked into 
+    # [batch, image_height, image_width, channels] tensor for image (or 
+    # [batch, num_boxes, image_height, image_width] tensor for masks) to be fed 
+    # to the network:
     tensor_dict = utils.unbatch_padded_tensors(
-        tensor_dict, static_shapes)
-
-#    print('\n', tensor_dict, '\n')
+        tensor_dict, 
+        static_shapes, 
+        keep_padded_list=[TensorDictFields.image, 
+                          TensorDictFields.groundtruth_masks])
 
     if self._num_classes is not None:
       tensor_dict = utils.sparse_to_one_hot_labels(
           tensor_dict, self._num_classes)
-
-#    print('\n', tensor_dict, '\n')
 
     return tensor_dict
 
@@ -144,30 +153,35 @@ class TrainerDataset(DetectionDataset):
                preprocessor,
                num_classes=None,
                shuffle=False,
-               filename_dataset_shuffle_buffer_size=100,
-               record_dataset_shuffle_buffer_size=2048,
+               reader_buffer_size=100,
+               shuffle_buffer_size=2048,
                random_seed=0,
                num_readers=10,
-               read_block_length=32):
+               bucketed_batching=False,
+               height_boundaries=(),
+               width_boundaries=()):
     """Constructor.
 
     Args:
       batch_size: int scalar, batch size.
       num_epochs: int scalar, num of times the original dataset is repeated.
         If None or <= 0, the dataset is repeated infinitely.
-      decoder: a detection.core.DataDecoder instance. 
+      decoder: a detection.core.DataDecoder instance.
       preprocessor: a detection.preprocess.DataPreprocessor instance.
       num_classes: int scalar, num of object categories excluding background.
         If not None, the groundtruth class labels in tensor_dict will have 
         shape [num_gt_boxes, num_classes] (one hot) rather than [num_gt_boxes].
       shuffle: bool scalar, whether input data is to be shuffled.
-      filename_dataset_shuffle_buffer_size: int scalar, shuffle buffer size
-        for filename dataset. 
-      record_dataset_shuffle_buffer_size: int scalar, shuffle buffer size
-        for TFRecord dataset.
+      reader_buffer_size: int scalar, buffer size for `tf.data.TFRecordDataset`.
+      shuffle_buffer_size: int scalar, shuffle buffer size for TFRecord dataset.
       random_seed: int scalar, random seed.
       num_readers: int scalar, num of readers.
-      read_block_length: int scalar, read block length.
+      bucketed_batching: bool scalar, whether to group tensors into buckets
+         based on image spatial dimensions before batching. Defaults to False.
+      height_boundaries: list or tuple of increasing int scalars, bucket 
+        boundaries of heights. Ignored if `bucketed_batching` is False.
+      width_boundaries: list or tuple of increasing int scalars, bucket
+        boundaries of widths.Ignored if `bucketed_batching` is False.
     """
     self._batch_size = batch_size
     self._num_epochs = num_epochs
@@ -175,13 +189,13 @@ class TrainerDataset(DetectionDataset):
     self._preprocessor = preprocessor
     self._num_classes = num_classes
     self._shuffle = shuffle
-    self._filename_dataset_shuffle_buffer_size = (
-        filename_dataset_shuffle_buffer_size)
-    self._record_dataset_shuffle_buffer_size = (
-        record_dataset_shuffle_buffer_size)
+    self._reader_buffer_size = reader_buffer_size
+    self._shuffle_buffer_size = shuffle_buffer_size
     self._random_seed = random_seed
     self._num_readers = num_readers
-    self._read_block_length = read_block_length
+    self._bucketed_batching = bucketed_batching
+    self._height_boundaries = height_boundaries
+    self._width_boundaries = width_boundaries
 
     self._file_read_fn = functools.partial(
         tf.data.TFRecordDataset, buffer_size=8 * 1000 * 1000)
@@ -200,23 +214,23 @@ class TrainerDataset(DetectionDataset):
     Returns:
       tensor_dict: a dict mapping from tensor names to tensors.
     """
-    filename_dataset = tf.data.Dataset.from_tensor_slices(filenames)
-    if self._shuffle:
-      filename_dataset = filename_dataset.shuffle(
-          self._filename_dataset_shuffle_buffer_size, seed=self._random_seed)
-    filename_dataset = filename_dataset.repeat(
+    record_dataset = tf.data.TFRecordDataset(
+        filenames, 
+        buffer_size=self._reader_buffer_size,
+        num_parallel_reads=self._num_readers)
+
+    record_dataset = record_dataset.repeat(
         self._num_epochs if self._num_epochs > 0 else None)
-    record_dataset = filename_dataset.apply(
-        tf.contrib.data.parallel_interleave(
-            self._file_read_fn,
-            cycle_length=self._num_readers,
-            block_length=self._read_block_length,
-            sloppy=self._shuffle))
     if self._shuffle:
       record_dataset = record_dataset.shuffle(
-          self._record_dataset_shuffle_buffer_size, seed=self._random_seed)
+          self._shuffle_buffer_size, seed=self._random_seed)
+
     tensor_dict = self._train_eval_get_tensor_dict_from_record_dataset(
-        record_dataset, self._batch_size)
+        record_dataset, 
+        self._batch_size, 
+        self._bucketed_batching, 
+        self._height_boundaries, 
+        self._width_boundaries)
 
     return tensor_dict
 

@@ -37,7 +37,7 @@ from detection.utils import misc_utils
 SSD_LOSSES = 'loc_loss', 'cls_loss'
 FASTER_RCNN_LOSSES = ('rpn_loc_loss', 'rpn_cls_loss', 
                       'frcnn_loc_loss', 'frcnn_cls_loss')
-
+#                      'frcnn_loc_loss', 'frcnn_cls_loss', 'frcnn_msk_loss')
 flags = tf.app.flags
 
 flags.DEFINE_string(
@@ -83,6 +83,10 @@ def main(_):
   files = list(test_config.input_file)
   
   to_be_run_dict, losses_dict = model_evaluator.evaluate(files, dataset)
+  if 'frcnn_msk_loss' in losses_dict:
+    losses_names = list(losses_names)
+    losses_names.append('frcnn_msk_loss')
+    losses_names = tuple(losses_names)
 
   restore_saver = model_evaluator.create_restore_saver()
 
@@ -96,22 +100,27 @@ def main(_):
   class_indices = list(label_map.keys())
   if test_config.metrics_name == 'pascal_voc_detection_metrics':
     met_calc = metrics_calculator.PascalVocMetricsCalculator(num_classes, class_indices)
-  elif test_config.metrics_name == 'coco_detection_metrics':
+  elif test_config.metrics_name == 'coco_box_detection_metrics':
     categories = misc_utils.label_map_to_categories(label_map)
     met_calc = metrics_calculator.MscocoMetricsCalculator(categories, class_indices)
+  elif test_config.metrics_name == 'coco_mask_detection_metrics':
+    categories = misc_utils.label_map_to_categories(label_map)
+    met_calc = metrics_calculator.MscocoMetricsCalculator(categories, class_indices, evaluate_mask=True)
 
   losses = []
   while True:
     try:
       detection_result, losses_result = sess.run([to_be_run_dict, losses_dict])
+#      print(detection_result['boxes'].shape, '%f' % detection_result['boxes'].mean(), detection_result['scores'].shape, '%f' % detection_result['scores'].mean(), detection_result['masks'].shape, '%f' % detection_result['masks'].mean(), detection_result['gt_boxes'].shape, '%f' % detection_result['gt_boxes'].mean(), detection_result['gt_masks'].shape, '%f' % detection_result['gt_masks'].mean())
+
     except tf.errors.OutOfRangeError:
       break;
+    
     losses.append([losses_result[k] for k in losses_names])
-    met_calc.update_per_image_result(detection_result,
-                                     detection_result['gt_boxes'],
-                                     detection_result['gt_labels'])
-  losses = np.array(losses)
+    met_calc.update_per_image_result(detection_result)
 
+  losses = np.array(losses)
+  print(losses.shape)
   sess.close()
 
   misc_utils.print_evaluation_metrics(met_calc,

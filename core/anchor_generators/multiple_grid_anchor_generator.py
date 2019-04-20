@@ -108,6 +108,7 @@ class MultipleGridAnchorGenerator(anchor_generator.AnchorGenerator):
 def create_ssd_anchors(num_layers=6,
                        min_scale=0.2,
                        max_scale=0.95,
+                       lowest_scale=0.1,
                        scales=None,
                        aspect_ratios=(1.0, 2.0, 3.0, 1.0 / 2, 1.0 / 3),
                        interpolated_scale_aspect_ratio=1.0,
@@ -126,6 +127,8 @@ def create_ssd_anchors(num_layers=6,
     num_layers: int scalar, the num of feature maps to generate anchors for. 
     min_scale: float scalar, scale of anchors with finest resolution.
     max_scale: float scalar, scale of anchors with coarsest resolution.
+    lowest_scale: float scalar, scale of the anchors for the lowest layer (
+      feature map). Igored if `reduce_boxes_in_lowest_layer` is False.
     scales: a list of floats, with length `num_layers`, holding an increasing
       float numbers as scales for anchors in each feature map. If None, a 
       default list [min_scale, .., max_scale] holding evenly spaced scales is 
@@ -156,7 +159,7 @@ def create_ssd_anchors(num_layers=6,
   box_specs_list = []
   for layer, (scale, scale_next) in enumerate(zip(scales[:-1], scales[1:])):
     if layer == 0 and reduce_boxes_in_lowest_layer:
-      layer_box_specs = [(0.1, 1.0), (scale, 2.0), (scale, 0.5)]
+      layer_box_specs = [(lowest_scale, 1.0), (scale, 2.0), (scale, 0.5)]
     else:
       layer_box_specs = []
       for aspect_ratio in aspect_ratios:

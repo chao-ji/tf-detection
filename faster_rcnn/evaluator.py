@@ -20,6 +20,7 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
                rpn_anchor_generator,
                rpn_box_predictor,
                frcnn_box_predictor,
+               frcnn_mask_predictor,
 
                rpn_target_assigner,
                rpn_minibatch_sampler_fn,
@@ -31,6 +32,7 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
                rpn_classification_loss_fn,
                frcnn_localization_loss_fn,
                frcnn_classification_loss_fn,
+               frcnn_mask_loss_fn,
 
                rpn_nms_fn,
                rpn_score_conversion_fn,
@@ -39,10 +41,12 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
                rpn_classification_loss_weight,
                frcnn_localization_loss_weight,
                frcnn_classification_loss_weight,
+               frcnn_mask_loss_weight,
 
                proposal_crop_size,
                rpn_minibatch_size,
-               rpn_box_predictor_depth):
+               rpn_box_predictor_depth,
+               first_stage_atrous_rate):
     """Constructor.
 
     Args:
@@ -59,6 +63,8 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         predictions and class score predictions for RPN. 
       frcnn_box_predictor: an instance of BoxPredictor. Generates box encoding
         predictions and class score predictions for Fast RCNN.
+      frcnn_mask_predictor: an instance of MaskPredictor. Generates mask 
+        predictions for Fast RCNN.
 
       rpn_target_assigner: an instance of TargetAssigner that assigns 
         localization and classification targets to eacn anchorwise prediction
@@ -81,6 +87,7 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         localization loss.
       frcnn_classification_loss_fn: a callable that computes Fast RCNN's
         classification loss.
+      frcnn_mask_loss_fn: a callable that computes Fast RCNN's mask loss.
 
       rpn_nms_fn: a callable that performs NMS on the proposal coordinate 
         predictions from RPN.
@@ -95,6 +102,8 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         localization loss relative to classification loss.
       frcnn_classification_loss_weight: float scalar, scales the contribution
         of classification loss relative to localization loss.
+      frcnn_mask_loss_weight: float scalar, scales the contribution of mask loss
+        relative to localization loss and classification loss.
 
       proposal_crop_size: int scalar, the height and width dimension of ROIs
         extracted from the feature map shared by RPN and Fast RCNN.
@@ -112,12 +121,14 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         rpn_anchor_generator=rpn_anchor_generator,
         rpn_box_predictor=rpn_box_predictor,
         frcnn_box_predictor=frcnn_box_predictor,
+        frcnn_mask_predictor=frcnn_mask_predictor,
 
         rpn_nms_fn=rpn_nms_fn,
         rpn_score_conversion_fn=rpn_score_conversion_fn,
 
         proposal_crop_size=proposal_crop_size,
-        rpn_box_predictor_depth=rpn_box_predictor_depth)
+        rpn_box_predictor_depth=rpn_box_predictor_depth,
+        first_stage_atrous_rate=first_stage_atrous_rate)
 
     self._rpn_target_assigner = rpn_target_assigner
     self._rpn_minibatch_sampler_fn = rpn_minibatch_sampler_fn
@@ -129,11 +140,13 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
     self._rpn_classification_loss_fn = rpn_classification_loss_fn
     self._frcnn_localization_loss_fn = frcnn_localization_loss_fn
     self._frcnn_classification_loss_fn = frcnn_classification_loss_fn
+    self._frcnn_mask_loss_fn = frcnn_mask_loss_fn
 
     self._frcnn_localization_loss_weight = frcnn_localization_loss_weight
     self._frcnn_classification_loss_weight = frcnn_classification_loss_weight
     self._rpn_localization_loss_weight = rpn_localization_loss_weight
     self._rpn_classification_loss_weight = rpn_classification_loss_weight
+    self._frcnn_mask_loss_weight = frcnn_mask_loss_weight
 
     self._rpn_minibatch_size=rpn_minibatch_size
 
@@ -181,9 +194,7 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
 
     inputs = self.preprocess(image_list)
 
-    gt_boxlist_list = misc_utils.preprocess_groundtruth(
-        tensor_dict[TensorDictFields.groundtruth_boxes], 
-        tensor_dict[TensorDictFields.groundtruth_labels])
+    gt_boxlist_list = misc_utils.preprocess_groundtruth(tensor_dict)
 
     rpn_prediction_dict = self.predict_rpn(inputs)
 
@@ -196,16 +207,30 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         rpn_detection_dict['proposal_boxlist_list'], 
         rpn_prediction_dict['shared_feature_map'])
 
-    frcnn_losses_dict = commons.compute_frcnn_loss(
-        self, frcnn_prediction_dict, rpn_detection_dict, gt_boxlist_list)
-
     frcnn_detection_dict = commons.postprocess_frcnn(
         self, frcnn_prediction_dict, rpn_detection_dict)
+
+
+    if self._frcnn_mask_predictor is not None:
+      mask_predictions = self.predict_masks(
+          frcnn_prediction_dict,
+          rpn_detection_dict,
+          rpn_prediction_dict['shared_feature_map'])
+      frcnn_prediction_dict['mask_predictions'] = mask_predictions
+
+      mask_detections = commons.postprocess_masks(mask_predictions, frcnn_detection_dict)
+      frcnn_detection_dict['masks'] = mask_detections
+
+    frcnn_losses_dict = commons.compute_frcnn_loss(
+        self, frcnn_prediction_dict, rpn_detection_dict, gt_boxlist_list)
 
     losses_dict = { 'rpn_loc_loss': rpn_losses_dict['loc_loss'],
                     'rpn_cls_loss': rpn_losses_dict['cls_loss'],
                     'frcnn_loc_loss': frcnn_losses_dict['loc_loss'],
                     'frcnn_cls_loss': frcnn_losses_dict['cls_loss']}
+
+    if 'msk_loss' in frcnn_losses_dict:
+      losses_dict['frcnn_msk_loss'] = frcnn_losses_dict['msk_loss']
 
     to_be_run_dict = misc_utils.process_per_image_detection(
         image_list, frcnn_detection_dict, gt_boxlist_list)

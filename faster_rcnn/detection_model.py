@@ -40,12 +40,14 @@ class DetectionModel(object):
                rpn_anchor_generator,
                rpn_box_predictor,
                frcnn_box_predictor,
+               frcnn_mask_predictor,
 
                rpn_nms_fn,
                rpn_score_conversion_fn, 
 
                proposal_crop_size,
-               rpn_box_predictor_depth):
+               rpn_box_predictor_depth,
+               first_stage_atrous_rate):
     """Constructor.
 
     Args:
@@ -62,6 +64,8 @@ class DetectionModel(object):
         predictions and class score predictions for RPN. 
       frcnn_box_predictor: an instance of BoxPredictor. Generates box encoding
         predictions and class score predictions for Fast RCNN.
+      frcnn_mask_predictor: an instance of MaskPredictor. Generates mask 
+        predictions for Fast RCNN.
       rpn_nms_fn: a callable that performs NMS on the box coordinate 
         predictions from RPN.
       rpn_score_conversion_fn: a callable that converts raw predicted class 
@@ -78,12 +82,14 @@ class DetectionModel(object):
     self._rpn_anchor_generator = rpn_anchor_generator
     self._rpn_box_predictor = rpn_box_predictor
     self._frcnn_box_predictor = frcnn_box_predictor
+    self._frcnn_mask_predictor = frcnn_mask_predictor
 
     self._rpn_nms_fn = rpn_nms_fn
     self._rpn_score_conversion_fn = rpn_score_conversion_fn    
 
     self._proposal_crop_size = proposal_crop_size
     self._rpn_box_predictor_depth = rpn_box_predictor_depth
+    self._first_stage_atrous_rate = first_stage_atrous_rate
 
   @abstractproperty
   def is_training(self):
@@ -120,11 +126,13 @@ class DetectionModel(object):
 
   @property
   def max_num_proposals(self):
-    """Returns the num of proposals (size of the minibatch for Fast RCNN).
+    """Returns the max num of proposals to compute Faster R-CNN loss for (for 
+    trainer and evaluator) and generate detections in NMS (for evaluator and 
+    inferencer).
 
-    Note that at training time a subset of proposals are sampled from the 
-    collection of proposals predicted and nms'ed from RPN, so the num of 
-    proposals would be smaller than that at evaluation or inference time.
+    Note that at training time, an even smaller set (e.g. 64) of proposals will 
+    be sampled from the collection of proposals predicted and nms'ed (300) from 
+    RPN.
     """
     if self.is_training:
       return self._frcnn_minibatch_size 
@@ -202,7 +210,7 @@ class DetectionModel(object):
     a smaller set before being used to extract ROI features in the next stage.
 
     Note the output list of proposal BoxLists are potentially zero-padded 
-    because of the NMS. The num of valid proposals are indicated in
+    because of the NMS. The actual num of valid proposals are indicated in
     `num_proposals`.
 
     Args:
@@ -215,19 +223,19 @@ class DetectionModel(object):
           'anchor_boxlist_list': a list of BoxList instance, each holding 
             `num_anchors` anchor boxes. Length is equal to `batch_size`.}
       gt_boxlist_list: a list of BoxList instances, each holding `num_gt_boxes`
-        groundtruth boxes, with extra 'labels' field holding float tensor of shap 
-        [num_gt_boxes, num_classes + 1] (groundtruth boxes labels). Length of 
-        list is equal to `batch_size`. Must be provided at training time.
+        groundtruth boxes, with extra 'labels' field holding float tensor of 
+        shape [num_gt_boxes, num_classes + 1] (groundtruth boxes labels). Length
+        of list is equal to `batch_size`. Must be provided at training time.
 
     Returns:
       rpn_detection_dict: a dict mapping from strings to tensors/BoxLists, 
         holding the following entries: 
         { 'proposal_boxlist_list': a list of BoxList instances, each holding 
-            `max_num_boxes` proposal boxes (coordinates normalized). The fields
-            are potentially zero-padded up to `max_num_boxes`. Length of list
-            is equal to `batch_size`.
-          'num_proposals': int tensor of shape [batch_size], holding the num of
-            valid boxes (not zero-padded) in each BoxList of 
+            `max_num_proposals` proposal boxes (coordinates normalized). The 
+            fields are potentially zero-padded up to `max_num_proposals`. Length
+            of list is equal to `batch_size`.
+          'num_proposals': int tensor of shape [batch_size], holding the actual 
+            num of valid boxes (not zero-padded) in each BoxList of 
             `proposal_boxlist_list`.}
     """
     if self.is_training and gt_boxlist_list is None:
@@ -249,6 +257,7 @@ class DetectionModel(object):
         proposal_boxes,
         objectness_predictions,
         clip_window=ops.get_unit_square(batch_size))
+
     proposal_boxlist_list = [box_list.BoxList(proposal) for proposal in 
                              tf.unstack(proposal_boxes)]
     rpn_detection_dict = {'proposal_boxlist_list': proposal_boxlist_list,
@@ -256,12 +265,13 @@ class DetectionModel(object):
 
     if self.is_training:
       proposal_boxes = tf.stop_gradient(proposal_boxes)
-      # further samples a smaller set of nms'ed proposals for Fast RCNN
+      # samples an even smaller set of nms'ed proposals for Fast RCNN 300->64
       proposal_boxlist_list, num_proposals = commons.sample_frcnn_minibatch(
           self, 
           proposal_boxes, 
           num_proposals, 
           gt_boxlist_list)
+
       rpn_detection_dict = {'proposal_boxlist_list': proposal_boxlist_list, 
                             'num_proposals': num_proposals}
 
@@ -274,8 +284,8 @@ class DetectionModel(object):
 
     Args:
       proposal_boxlist_list: a list of BoxList instances, each holding 
-        `max_num_boxes` proposal boxes (coordinates normalized). The fields
-        are potentially zero-padded up to `max_num_boxes`. Length of list
+        `max_num_proposals` proposal boxes (coordinates normalized). The fields
+        are potentially zero-padded up to `max_num_proposals`. Length of list
         is equal to `batch_size`.
       shared_feature_map: float tensor of shape 
         [batch_size, height, width, depth].
@@ -284,18 +294,27 @@ class DetectionModel(object):
       frcnn_prediction_dict: a dict mapping from strings to tensors,
         holding the following entries:
         { 'box_encoding_predictions': float tensor of shape 
-            [batch_size, max_num_boxes, num_classes, 4], 
+            [batch_size, max_num_proposals, num_classes, 4], 
           'class_predictions': float tensor of shape
-            [batch_size, max_num_boxes, num_class + 1].}
+            [batch_size, max_num_proposals, num_class + 1],
+          'box_predictor_features': float tensor of shape
+            [batch_num_proposals, height_out, width_out, depth_out]}
     """
     proposal_boxes = tf.stack([proposal_boxlist.get() for proposal_boxlist 
         in proposal_boxlist_list])
 
+    # [batch_num_proposals, crop_size/2, crop_size/2, depth] e.g. 64, 7, 7, 1024
     batched_roi_feature_maps = self._extract_roi_feature_maps(
         shared_feature_map, proposal_boxes)
 
     with slim.arg_scope([slim.batch_norm],
         is_training=(self.is_training and not self._freeze_batch_norm)):
+      # stride == 1:
+      # [batch_num_proposals, crop_size/2, crop_size/2, new_depth] 
+      # e.g. 64, 7, 7, 2048 
+      # stride == 2:
+      # [batch_num_proposals, crop_size/4, crop_size/4, new_depth] 
+      # e.g. 64, 4, 4, 2048
       box_predictor_features = (
           self._feature_extractor.extract_second_stage_features(
               batched_roi_feature_maps))
@@ -304,7 +323,11 @@ class DetectionModel(object):
         self._frcnn_box_predictor.predict(
             [box_predictor_features], 
             scope=self.second_stage_box_predictor_scope))
+    # [batch_num_proposals, 1, num_classes, 4]
+    # e.g. 64, 1, 90, 4
     box_encoding_predictions = box_encoding_predictions[0]
+    # [batch_num_proposals, 1, num_classes + 1]
+    # e.g. 64, 1, 91 
     class_predictions = class_predictions[0]
 
     num_classes = self._frcnn_box_predictor._num_classes
@@ -317,7 +340,8 @@ class DetectionModel(object):
         class_predictions, [-1, self.max_num_proposals, num_classes + 1])
 
     return {'box_encoding_predictions': box_encoding_predictions,
-            'class_predictions': class_predictions}
+            'class_predictions': class_predictions,
+            'box_predictor_features': box_predictor_features}
 
   def _extract_shared_feature_map(self, inputs):
     """Extracts the feature map shared by both RPN and Fast RCNN.
@@ -333,8 +357,11 @@ class DetectionModel(object):
     """
     with slim.arg_scope([slim.batch_norm], 
         is_training=(self.is_training and not self._freeze_batch_norm)):
+      # shared_feature_map: 
+      # [batch_size, height/output_stride, width/output_stride, depth_out]
       shared_feature_map = self._feature_extractor.extract_first_stage_features(
           inputs)
+
     image_shape = shape_utils.combined_static_and_dynamic_shape(inputs)
     return shared_feature_map, image_shape
 
@@ -379,10 +406,13 @@ class DetectionModel(object):
         [batch_size, num_anchors, 2].
     """
     with slim.arg_scope(self._rpn_box_predictor._conv_hyperparams_fn()):
+      # stride = 1
+      # [batch_size, height, width, new_depth]
       rpn_box_predictor_feature_map = slim.conv2d(
           shared_feature_map,
           self._rpn_box_predictor_depth,
           kernel_size=kernel_size,
+          rate=self._first_stage_atrous_rate,
           activation_fn=tf.nn.relu6)
 
     (box_encoding_predictions_list, objectness_predictions_list
@@ -391,44 +421,49 @@ class DetectionModel(object):
         scope=self.first_stage_box_predictor_scope)
     rpn_box_encoding_predictions = box_encoding_predictions_list[0]
     rpn_objectness_predictions = objectness_predictions_list[0]
+
     return rpn_box_encoding_predictions, rpn_objectness_predictions
 
   def _extract_roi_feature_maps(self, shared_feature_map, proposal_boxes):
-    # (1, ?, ?, 576)
-    # (1, 300, 4) 
-    """Performs the equivalent of ROI pooling in Fast RCNN paper by cropping 
-    regions from the feature map according to predicted proposals, and resizing 
-    them to a fixed spatial dimension, followed by a 2x2 max pooling.
+    """Extracts ROI feature maps based on predicted region proposals, and 
+    resizes them to a fixed spatial dimension, followed by a 2x2 max pooling.
+
+    NOTE: `tf.image.crop_and_resize` performs ROI align rather than ROI pooling
+    used in Faster R-CNN.
 
     Args:
       shared_feature_map: float tensor of shape 
         [batch_size, height, width, depth], feature map shared by RPN and Fast 
         RCNN.
-      proposal_boxes: float tensor of shape [batch_size, num_proposals, 4], 
+      proposal_boxes: float tensor of shape [batch_size, max_num_proposals, 4], 
         holding the decoded, nms'ed and clipped proposal box coordinates. Note 
         that a subset of the boxes might be zero-paddings.
 
     Returns:
       roi_feature_maps: float tensor of shape 
-        [batch_size * num_proposals, height_roi, width_roi, depth], holding 
+        [batch_num_proposals, height_roi, width_roi, depth], holding 
         feature maps of regions of interest cropped and resized from the input 
         feature map. Note that the ROIs from different images in a batch are 
-        arranged along the 0th dimension of size `batch_size * num_proposals`. 
+        arranged along the 0th dimension, so `batch_num_proposals` =  
+        `batch_size * max_num_proposals`. 
     """
+    # e.g.
+    # shared_feature_map: 1, ?, ?, 1024
+    # proposal_boxes: 1, 64, 4
     shape = shape_utils.combined_static_and_dynamic_shape(proposal_boxes)
     proposal_boxes = tf.reshape(proposal_boxes, [shape[0] * shape[1], -1])
-
     box_indices = tf.reshape(tf.tile(
         tf.expand_dims(tf.range(shape[0]), axis=1), [1, shape[1]]), [-1])
-    # 300, 14, 14, 576 
+    # [batch_size * max_num_proposals, crop_size, crop_size, depth] 
+    # e.g. 64, 14, 14, 1024 
     regions_feature_maps = tf.image.crop_and_resize(
         shared_feature_map, proposal_boxes, box_indices, 
         (self._proposal_crop_size, self._proposal_crop_size))
 
-    # 300, 7, 7, 576
+    # [batch_size * max_num_proposals, crop_size/2, crop_size/2, depth] 
+    # e.g. 64, 7, 7, 1024
     roi_feature_maps = slim.max_pool2d(
         regions_feature_maps, kernel_size=2, stride=2)
-
     return roi_feature_maps
 
   def preprocess(self, image_list):
@@ -453,4 +488,79 @@ class DetectionModel(object):
       return resized_image
 
     images = tf.stack([_preprocess_single_image(image) for image in image_list])
-    return images 
+    return images
+
+  def predict_masks(self, 
+                    frcnn_prediction_dict, 
+                    rpn_detection_dict, 
+                    shared_feature_map):
+    """Predict instance masks.
+
+    Note: In training mode, the feature map used to predict masks corresponds to
+    the region proposals predicted by RPN. However, in test mode, we need to 
+    further apply the box refinements predicted by Fast RCNN on the region 
+    proposals to get the REFINED region proposals (i.e. third stage).
+ 
+    Args:
+      frcnn_prediction_dict: a dict mapping from strings to tensors,
+        holding the following entries:
+        { 'box_encoding_predictions': float tensor of shape 
+            [batch_size, max_num_proposals, num_classes, 4], 
+          'class_predictions': float tensor of shape
+            [batch_size, max_num_proposals, num_class + 1],
+          'box_predictor_features': float tensor of shape
+            [batch_num_proposals, height_out, width_out, depth_out]}
+      rpn_detection_dict: a dict mapping from strings to tensors/BoxLists, 
+        holding the following entries: 
+        { 'proposal_boxlist_list': a list of BoxList instances, each holding 
+            `max_num_proposals` proposal boxes (coordinates normalized). The 
+            fields are potentially zero-padded up to `max_num_proposals`. Length
+            of list is equal to `batch_size`.
+          'num_proposals': int tensor of shape [batch_size], holding the actual 
+            num of valid boxes (not zero-padded) in each BoxList of 
+            `proposal_boxlist_list`.}
+      shared_feature_map: float tensor of shape 
+        [batch_size, height, width, depth], feature map shared by RPN and Fast 
+        RCNN.
+
+    Returns:
+      mask_predictions: float tensor of shape 
+        [batch_num_proposals, num_classes, mask_height, mask_width], holding 
+        instance mask predictions for each image in a batch.
+    """
+    if self.is_training: # trainining mode
+      # [batch_num_proposals, crop_size/2, crop_size/2, depth] e.g. 64, 7, 7, 2048
+      box_predictor_features = frcnn_prediction_dict['box_predictor_features']
+      # `box_predictor_features` comes straight from region proposals
+      mask_predictions_list = self._frcnn_mask_predictor.predict(
+          [box_predictor_features], scope=self.second_stage_box_predictor_scope)
+
+      # [batch_num_proposals, num_classes, mask_height, mask_width]
+      # e.g. [64, 90, 33, 33]
+      mask_predictions = mask_predictions_list[0]
+
+    else: # test mode
+      frcnn_detection_dict = commons.postprocess_frcnn(self,
+                                                       frcnn_prediction_dict,
+                                                       rpn_detection_dict)
+      # [batch_size, max_num_proposals, 4] e.g. [1, 300, 4]
+      detection_boxes = frcnn_detection_dict['boxes']
+      # [batch_num_proposals, crop_size/2, crop_size/2, depth] 
+      # e.g. 300, 7, 7, 1024
+      batched_roi_feature_maps = self._extract_roi_feature_maps(
+          shared_feature_map, detection_boxes)
+
+      with slim.arg_scope([slim.batch_norm],
+          is_training=(self.is_training and not self._freeze_batch_norm)):
+        # [batch_num_proposals, crop_size/2, crop_size/2, depth] e.g. 300, 7, 7, 2048
+        box_predictor_features = (
+            self._feature_extractor.extract_second_stage_features(
+                batched_roi_feature_maps))
+      # `box_predictor_features` comes from REFINED region proposals
+      mask_predictions_list = self._frcnn_mask_predictor.predict(
+          [box_predictor_features], scope=self.second_stage_box_predictor_scope)
+      # [batch_num_proposals, num_classes, mask_height, mask_width]
+      # e.g. [300, 90, 33, 33]
+      mask_predictions = mask_predictions_list[0]
+ 
+    return mask_predictions

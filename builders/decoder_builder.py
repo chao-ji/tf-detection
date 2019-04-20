@@ -47,5 +47,5 @@ def build(config):
     else:
       raise ValueError('Unknown feature parser.')
 
-  return data_decoder.DataDecoder(keys_to_features)
+  return data_decoder.DataDecoder(keys_to_features, config.load_masks)
 

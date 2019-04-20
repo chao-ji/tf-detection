@@ -4,6 +4,7 @@ from detection.builders import image_resizer_builder
 from detection.builders import conv_hyperparams_builder
 from detection.builders import anchor_generator_builder
 from detection.builders import box_predictor_builder
+from detection.builders import mask_predictor_builder
 from detection.builders import box_coder_builder
 from detection.builders import target_assigner_builder
 from detection.builders import losses_builder
@@ -70,6 +71,10 @@ def build_faster_rcnn_train_session(model_config,
   frcnn_box_predictor = box_predictor_builder.build(
       model_config.frcnn_box_predictor,
       num_classes=num_classes)
+  frcnn_mask_predictor = None
+  if model_config.HasField('frcnn_mask_predictor'):
+    frcnn_mask_predictor = mask_predictor_builder.build(
+        model_config.frcnn_mask_predictor)
    
   rpn_target_assigner = target_assigner_builder.build(
       model_config.rpn_target_assigner,
@@ -89,20 +94,25 @@ def build_faster_rcnn_train_session(model_config,
 
   ( rpn_localization_loss_fn,
     rpn_classification_loss_fn,
+    _,
     rpn_localization_loss_weight,
     rpn_classification_loss_weight,
+    _,
     _) = losses_builder.build(model_config.rpn_loss)
 
   ( frcnn_localization_loss_fn,
     frcnn_classification_loss_fn,
+    frcnn_mask_loss_fn,
     frcnn_localization_loss_weight,
     frcnn_classification_loss_weight,
+    frcnn_mask_loss_weight, 
     _) = losses_builder.build(model_config.frcnn_loss)
 
   proposal_crop_size=model_config.proposal_crop_size
   rpn_minibatch_size = model_config.rpn_minibatch_size
   frcnn_minibatch_size = model_config.frcnn_minibatch_size
   rpn_box_predictor_depth = model_config.rpn_box_predictor_depth
+  first_stage_atrous_rate = model_config.first_stage_atrous_rate
   freeze_batch_norm = model_config.freeze_batch_norm
   gradient_clipping_by_norm = train_config.gradient_clipping_by_norm
 
@@ -115,6 +125,7 @@ def build_faster_rcnn_train_session(model_config,
       rpn_anchor_generator=rpn_anchor_generator,
       rpn_box_predictor=rpn_box_predictor,
       frcnn_box_predictor=frcnn_box_predictor,
+      frcnn_mask_predictor=frcnn_mask_predictor,
 
       rpn_target_assigner=rpn_target_assigner,
       rpn_minibatch_sampler_fn=rpn_minibatch_sampler_fn,
@@ -125,6 +136,7 @@ def build_faster_rcnn_train_session(model_config,
       rpn_classification_loss_fn=rpn_classification_loss_fn,
       frcnn_localization_loss_fn=frcnn_localization_loss_fn,
       frcnn_classification_loss_fn=frcnn_classification_loss_fn,
+      frcnn_mask_loss_fn=frcnn_mask_loss_fn,
 
       rpn_nms_fn=rpn_nms_fn,
       rpn_score_conversion_fn=rpn_score_conversion_fn,
@@ -133,11 +145,13 @@ def build_faster_rcnn_train_session(model_config,
       rpn_classification_loss_weight=rpn_classification_loss_weight,
       frcnn_localization_loss_weight=frcnn_localization_loss_weight,
       frcnn_classification_loss_weight=frcnn_classification_loss_weight,
+      frcnn_mask_loss_weight=frcnn_mask_loss_weight,
 
       proposal_crop_size=proposal_crop_size,
       rpn_minibatch_size=rpn_minibatch_size,
       frcnn_minibatch_size=frcnn_minibatch_size,
       rpn_box_predictor_depth=rpn_box_predictor_depth,
+      first_stage_atrous_rate=first_stage_atrous_rate,
       freeze_batch_norm=freeze_batch_norm, 
       gradient_clipping_by_norm=gradient_clipping_by_norm)
   # dataset
@@ -181,6 +195,10 @@ def build_faster_rcnn_evaluate_session(model_config,
   frcnn_box_predictor = box_predictor_builder.build(
       model_config.frcnn_box_predictor,
       num_classes=num_classes)
+  frcnn_mask_predictor = None
+  if model_config.HasField('frcnn_mask_predictor'):
+    frcnn_mask_predictor = mask_predictor_builder.build(
+        model_config.frcnn_mask_predictor)
 
   rpn_target_assigner = target_assigner_builder.build(
       model_config.rpn_target_assigner,
@@ -199,19 +217,24 @@ def build_faster_rcnn_evaluate_session(model_config,
 
   ( rpn_localization_loss_fn,  
     rpn_classification_loss_fn,
+    _,
     rpn_localization_loss_weight,  
     rpn_classification_loss_weight,
+    _,
     _) = losses_builder.build(model_config.rpn_loss)
 
   ( frcnn_localization_loss_fn,  
     frcnn_classification_loss_fn,
+    frcnn_mask_loss_fn,
     frcnn_localization_loss_weight,  
     frcnn_classification_loss_weight,
+    frcnn_mask_loss_weight,
     _) = losses_builder.build(model_config.frcnn_loss)
 
   proposal_crop_size=model_config.proposal_crop_size  
   rpn_minibatch_size = model_config.rpn_minibatch_size
   rpn_box_predictor_depth = model_config.rpn_box_predictor_depth
+  first_stage_atrous_rate = model_config.first_stage_atrous_rate
 
   # faster rcnn model
   model_evaluator = evaluator.FasterRcnnModelEvaluator(
@@ -222,6 +245,7 @@ def build_faster_rcnn_evaluate_session(model_config,
       rpn_anchor_generator=rpn_anchor_generator,
       rpn_box_predictor=rpn_box_predictor,
       frcnn_box_predictor=frcnn_box_predictor,
+      frcnn_mask_predictor=frcnn_mask_predictor,
 
       rpn_target_assigner=rpn_target_assigner,
       rpn_minibatch_sampler_fn=rpn_minibatch_sampler_fn,
@@ -233,6 +257,7 @@ def build_faster_rcnn_evaluate_session(model_config,
       rpn_classification_loss_fn=rpn_classification_loss_fn,
       frcnn_localization_loss_fn=frcnn_localization_loss_fn,
       frcnn_classification_loss_fn=frcnn_classification_loss_fn,
+      frcnn_mask_loss_fn=frcnn_mask_loss_fn,
 
       rpn_nms_fn=rpn_nms_fn,
       rpn_score_conversion_fn=rpn_score_conversion_fn,
@@ -241,10 +266,12 @@ def build_faster_rcnn_evaluate_session(model_config,
       rpn_classification_loss_weight=rpn_classification_loss_weight,
       frcnn_localization_loss_weight=frcnn_localization_loss_weight,
       frcnn_classification_loss_weight=frcnn_classification_loss_weight,
+      frcnn_mask_loss_weight=frcnn_mask_loss_weight,
 
       proposal_crop_size=proposal_crop_size,
       rpn_minibatch_size=rpn_minibatch_size,
-      rpn_box_predictor_depth=rpn_box_predictor_depth)
+      rpn_box_predictor_depth=rpn_box_predictor_depth,
+      first_stage_atrous_rate=first_stage_atrous_rate)
   # dataset
   dataset = dataset_builder.build(dataset_config, ModeKeys.eval, num_classes)
 
@@ -284,6 +311,10 @@ def build_faster_rcnn_inference_session(model_config,
   frcnn_box_predictor = box_predictor_builder.build(
       model_config.frcnn_box_predictor,
       num_classes=num_classes)
+  frcnn_mask_predictor = None
+  if model_config.HasField('frcnn_mask_predictor'):
+    frcnn_mask_predictor = mask_predictor_builder.build(
+        model_config.frcnn_mask_predictor)
 
   frcnn_nms_fn, frcnn_score_conversion_fn = postprocessing_builder.build(
       model_config.frcnn_post_processing)
@@ -292,6 +323,7 @@ def build_faster_rcnn_inference_session(model_config,
 
   proposal_crop_size=model_config.proposal_crop_size
   rpn_box_predictor_depth = model_config.rpn_box_predictor_depth
+  first_stage_atrous_rate = model_config.first_stage_atrous_rate
 
   # faster rcnn model
   model_inferencer = inferencer.FasterRcnnModelInferencer(
@@ -302,6 +334,7 @@ def build_faster_rcnn_inference_session(model_config,
       rpn_anchor_generator=rpn_anchor_generator,
       rpn_box_predictor=rpn_box_predictor,
       frcnn_box_predictor=frcnn_box_predictor,
+      frcnn_mask_predictor=frcnn_mask_predictor,
 
       frcnn_nms_fn=frcnn_nms_fn,
       frcnn_score_conversion_fn=frcnn_score_conversion_fn,
@@ -309,7 +342,8 @@ def build_faster_rcnn_inference_session(model_config,
       rpn_score_conversion_fn=rpn_score_conversion_fn,
 
       proposal_crop_size=model_config.proposal_crop_size,
-      rpn_box_predictor_depth=rpn_box_predictor_depth)
+      rpn_box_predictor_depth=rpn_box_predictor_depth,
+      first_stage_atrous_rate=first_stage_atrous_rate)
   # dataset
   dataset = dataset_builder.build(dataset_config, ModeKeys.infer, num_classes)
   

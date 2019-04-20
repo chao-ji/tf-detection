@@ -52,12 +52,12 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
   def num_classes(self):
     return self._num_classes
 
-  def update_per_image_result(self, detection_dict, gt_boxes, gt_labels):
+  def update_per_image_result(self, result_dict):
     """Updates internal accumulators with per-image groundtruth and detection 
     results. 
 
     Args:
-      detection_dict: a dict mapping from field names to numpy arrays, holding
+      result_dict: a dict mapping from field names to numpy arrays, holding
         the following entries:
         { 'boxes' float numpy array of shape [num_detections, 4],
           'classes' int numpy array of shape [num_detections],
@@ -70,6 +70,9 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
     Returns:
       None
     """
+    gt_boxes = result_dict['gt_boxes']
+    gt_labels = result_dict['gt_labels']
+
     gt_labels -= 1
     for label in gt_labels:
       self._num_gt_instances[label] += 1
@@ -80,9 +83,9 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
     for i in range(self._num_classes):
       if i + 1 not in self._class_indices:
         continue
-      det_indices = (detection_dict['classes'] - 1 == i)
+      det_indices = (result_dict['classes'] - 1 == i)
       gt_indices = gt_labels == i
-      scores[i] = detection_dict['scores'][det_indices]
+      scores[i] = result_dict['scores'][det_indices]
 
       if not det_indices.any():
         scores[i] = np.array([], dtype=float)
@@ -94,7 +97,7 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
         continue
 
       iou = np_box_ops.iou(
-          detection_dict['boxes'][det_indices], gt_boxes[gt_indices])
+          result_dict['boxes'][det_indices], gt_boxes[gt_indices])
 
       scores[i] = scores[i].astype(np.float64)
       tp_fp_labels[i] = np.zeros(scores[i].shape[0], dtype=bool)
@@ -144,38 +147,38 @@ class PascalVocMetricsCalculator(DetectionMetricsCalculator):
 class MscocoMetricsCalculator(DetectionMetricsCalculator):
   """Computes COCO object detection metrics.
   """
-  def __init__(self, 
-               categories, 
+  def __init__(self,
+               categories,
                class_indices,
-               include_metrics_per_category=False, 
-               all_metrics_per_category=False):
+               evaluate_mask=False):
     """Constructor.
 
     Args:
       categories: a list of dict, each having two entries 'id' and 'name'.
         e.g., [{'id': 1, 'name': 'label_1'}, {'id': 2, 'name': 'label_2'}, ...]
       class_indices: list of ints, the class indices starting at 1.
-      include_metrics_per_category: bool scalar.
-      all_metrics_per_category: bool scalar.
     """
     self._categories = categories
     self._class_indices = class_indices
-    self._include_metrics_per_category = include_metrics_per_category
-    self._all_metrics_per_category = all_metrics_per_category
+    self._evaluate_mask = evaluate_mask
 
+    self._category_id_set = set([category['id']
+        for category in self._categories])
+    if evaluate_mask is True:
+      self._image_id_to_mask_shape_map = {}
+
+    # accumulators
     self._groundtruth_list = []
-    self._detections_list = []  
-    self._category_id_set = set([category['id'] 
-        for category in self._categories]) 
+    self._detections_list = []
     self._image_id = 0
     self._annotation_id = 1
 
-  def update_per_image_result(self, detection_dict, gt_boxes, gt_labels):
+  def update_per_image_result(self, result_dict):
     """Updates internal accumulators with per-image groundtruth and detection 
     results.
 
     Args:
-      detection_dict: a dict mapping from field names to numpy arrays, holding
+      result_dict: a dict mapping from field names to numpy arrays, holding
         the following entries:
         { 'boxes' float numpy array of shape [num_detections, 4],
           'classes' int numpy array of shape [num_detections],
@@ -188,55 +191,89 @@ class MscocoMetricsCalculator(DetectionMetricsCalculator):
     Returns:
       None
     """
-    valid_indices = [i in self._class_indices for i in detection_dict['classes']]
-    detection_dict['boxes'] = detection_dict['boxes'][valid_indices]
-    detection_dict['classes'] = detection_dict['classes'][valid_indices]
-    detection_dict['scores'] = detection_dict['scores'][valid_indices]
+    valid_indices = [i in self._class_indices for i in result_dict['classes']]
+    if self._evaluate_mask:
+      result_dict['masks'] = result_dict['masks'][valid_indices]
+    else:
+      result_dict['boxes'] = result_dict['boxes'][valid_indices]
+    result_dict['classes'] = result_dict['classes'][valid_indices]
+    result_dict['scores'] = result_dict['scores'][valid_indices]
+
+    gt_boxes = result_dict['gt_boxes']
+    gt_labels = result_dict['gt_labels']
+    gt_masks = None
+    if 'gt_masks' in result_dict:
+      gt_masks = result_dict['gt_masks']
 
     # groundtruth
     self._groundtruth_list.extend(coco_helpers.convert_groundtruth_to_coco_format(
-      image_id=self._image_id,
-      next_annotation_id=self._annotation_id,
-      category_id_set=self._category_id_set,
-      groundtruth_boxes=gt_boxes,
-      groundtruth_classes=gt_labels))
+        image_id=self._image_id,
+        next_annotation_id=self._annotation_id,
+        category_id_set=self._category_id_set,
+        groundtruth_boxes=gt_boxes,
+        groundtruth_classes=gt_labels,
+        groundtruth_masks=gt_masks))
     self._annotation_id += gt_boxes.shape[0]
+    if self._evaluate_mask:
+      self._image_id_to_mask_shape_map[self._image_id] = gt_masks.shape
 
     # detections
-    self._detections_list.extend(coco_helpers.convert_detections_to_coco_format(
-        image_id=self._image_id,
-        category_id_set=self._category_id_set,
-        detection_boxes=detection_dict['boxes'],
-        detection_scores=detection_dict['scores'],
-        detection_classes=detection_dict['classes']))
+    if self._evaluate_mask:
+      self._detections_list.extend(
+          coco_helpers.convert_mask_detections_to_coco_format(
+              image_id=self._image_id,
+              category_id_set=self._category_id_set,
+              detection_masks=result_dict['masks'],
+              detection_scores=result_dict['scores'],
+              detection_classes=result_dict['classes']))
+    else:
+      self._detections_list.extend(
+          coco_helpers.convert_box_detections_to_coco_format(
+              image_id=self._image_id,
+              category_id_set=self._category_id_set,
+              detection_boxes=result_dict['boxes'],
+              detection_scores=result_dict['scores'],
+              detection_classes=result_dict['classes']))
 
-    self._image_id += 1 
+    self._image_id += 1
 
   def calculate_metrics(self):
     """Calculates object detection metrics.
 
     Returns:
-      box_metrics: a dict mapping from metrics names (string) to metrics values
+      metrics: a dict mapping from metrics names (string) to metrics values
         (float). 
     """
+    if self._evaluate_mask:
+      images = [{'id': image_id, 'height': shape[1], 'width': shape[2]}
+          for image_id, shape in self._image_id_to_mask_shape_map.items()]
+      detection_type, iou_type, metric_name = 'segmentation', 'segm', 'Mask'
+    else:
+      images = [{'id': image_id} for image_id in range(self._image_id)]
+      detection_type, iou_type, metric_name = 'bbox', 'bbox', 'Box'
+
     groundtruth_dict = {
         'annotations': self._groundtruth_list,
-        'images': [{'id': image_id} for image_id in range(self._image_id)],
+        'images': images,
         'categories': self._categories
     }
 
-    coco_wrapped_groundtruth = coco_helpers.COCOWrapper(groundtruth_dict)
+    coco_wrapped_groundtruth = coco_helpers.COCOWrapper(
+        groundtruth_dict, detection_type=detection_type)
     coco_wrapped_detections = coco_wrapped_groundtruth.LoadAnnotations(
-        self._detections_list) 
-    box_evaluator = coco_helpers.COCOEvalWrapper(
-        coco_wrapped_groundtruth, coco_wrapped_detections, agnostic_mode=False)
-    box_metrics, box_per_category_ap = box_evaluator.ComputeMetrics(
-        include_metrics_per_category=self._include_metrics_per_category,
-        all_metrics_per_category=self._all_metrics_per_category)
-    box_metrics.update(box_per_category_ap)
-    box_metrics = {'DetectionBoxes_'+ key: value
-                   for key, value in iter(box_metrics.items())}
-    return box_metrics
+        self._detections_list)
+    evaluator = coco_helpers.COCOEvalWrapper(
+        coco_wrapped_groundtruth, 
+        coco_wrapped_detections, 
+        agnostic_mode=False, 
+        iou_type=iou_type)
+    metrics, per_category_ap = evaluator.ComputeMetrics(
+        include_metrics_per_category=False,
+        all_metrics_per_category=False)
+    metrics.update(per_category_ap)
+
+    metrics = {metric_name + key: value for key, value in metrics.items()}
+    return metrics
 
 
 def validate_boxes(boxes):

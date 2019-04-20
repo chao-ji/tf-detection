@@ -36,8 +36,8 @@ class FasterRcnnFeatureExtractor(object):
       shared_feature_map: float tensor of shape 
         [batch_size, height_out, width_out, depth_out].
     """
-    with tf.variable_scope(
-        scope, self._first_stage_feature_extractor_scope, [inputs]):
+    with tf.variable_scope(scope or self._first_stage_feature_extractor_scope,
+        values=[inputs]):
       return self._extract_first_stage_features(inputs)
 
   @abstractmethod
@@ -62,8 +62,9 @@ class FasterRcnnFeatureExtractor(object):
       proposal_classifier_features: float tensor of shape
         [batch_size * num_proposals, height_out, width_out, depth_out].
     """
-    with tf.variable_scope(scope, 
-      self._second_stage_feature_extractor_scope, [proposal_feature_maps]):
+    
+    with tf.variable_scope(scope or self._second_stage_feature_extractor_scope,
+        values=[proposal_feature_maps], reuse=tf.AUTO_REUSE):
       return self._extract_second_stage_features(proposal_feature_maps)
 
   @abstractmethod

@@ -31,7 +31,7 @@ def main(_):
   test_config_path = FLAGS.test_config_path
 
 
-  label_map = misc_utils.read_label_map(label_map_config_path)
+  label_map, num_classes = misc_utils.read_label_map(label_map_config_path)
   test_config = misc_utils.read_config(test_config_path, 'test')
   inference_directory = test_config.inference_directory
 

@@ -58,7 +58,6 @@ def main(_):
 
 
   label_map, num_classes = misc_utils.read_label_map(label_map_config_path)
-  print(num_classes)
 
   model_config = misc_utils.read_config(model_config_path, model_arch)
   dataset_config = misc_utils.read_config(dataset_config_path, 'dataset')
@@ -67,7 +66,8 @@ def main(_):
   if model_arch == 'ssd_model':
     model_trainer, dataset, optimizer_builder_fn = (
         ssd_model_builder.build_ssd_train_session(
-            model_config, dataset_config, train_config, num_classes)) 
+            model_config, dataset_config, train_config, num_classes))
+
   elif model_arch == 'faster_rcnn_model':
     model_trainer, dataset, optimizer_builder_fn = (
         faster_rcnn_model_builder.build_faster_rcnn_train_session(

@@ -16,6 +16,8 @@ message SSDAnchorGenerator {
 
   optional float max_scale = 3 [default = 0.95];
 
+  optional float lowest_scale = 14 [default = 0.1];
+
   repeated float scales = 12;
 
   repeated float aspect_ratios = 4;

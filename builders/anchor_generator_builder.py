@@ -29,6 +29,7 @@ def build(config):
         num_layers=config.num_layers,
         min_scale=config.min_scale,
         max_scale=config.max_scale,
+        lowest_scale=config.lowest_scale,
         scales=[float(scale) for scale in config.scales],
         aspect_ratios=config.aspect_ratios,
         interpolated_scale_aspect_ratio=config.interpolated_scale_aspect_ratio,
