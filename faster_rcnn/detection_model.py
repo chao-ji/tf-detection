@@ -70,10 +70,13 @@ class DetectionModel(object):
         predictions from RPN.
       rpn_score_conversion_fn: a callable that converts raw predicted class 
         logits into probability scores. 
-      proposal_crop_size: int scalar, the height and width dimension of ROIs
-        extracted from the feature map shared by RPN and Fast RCNN.
+      proposal_crop_size: int scalar, ROI Align will be applied on the feature 
+        map shared by RPN and Fast RCNN, which produces ROI feature maps of 
+        spatial dimensions [proposal_crop_size, proposal_crop_size].
       rpn_box_predictor_depth: int scalar, the depth of feature map preceding
         rpn box predictor.
+      first_stage_atrous_rate: int scalar, the atrous rate of the Conv2d 
+        operation preceding rpn box predictor.
     """
     self._image_resizer_fn = image_resizer_fn
     self._normalizer_fn = normalizer_fn
@@ -248,11 +251,17 @@ class DetectionModel(object):
     anchor_boxlist_list = rpn_prediction_dict['anchor_boxlist_list']
     batch_size = objectness_predictions.shape[0].value
 
+    # [batch_size, num_anchors, 1, 4]
     proposal_boxes = box_coder.batch_decode(
         box_encoding_predictions, anchor_boxlist_list, self._box_coder)
     objectness_predictions = self._rpn_score_conversion_fn(
         objectness_predictions)[:, :, 1:]
 
+    # proposal_boxes: [batch_size, max_num_proposals, 4]
+    # nms'ed proposals for each image in a batch, potentially padded
+
+    # num_proposals: [batch_size]
+    # actual number of non-padded proposal boxes for each image in a batch
     (proposal_boxes, _, _, num_proposals) = self._rpn_nms_fn(
         proposal_boxes,
         objectness_predictions,
@@ -262,7 +271,6 @@ class DetectionModel(object):
                              tf.unstack(proposal_boxes)]
     rpn_detection_dict = {'proposal_boxlist_list': proposal_boxlist_list,
                           'num_proposals': num_proposals}
-
     if self.is_training:
       proposal_boxes = tf.stop_gradient(proposal_boxes)
       # samples an even smaller set of nms'ed proposals for Fast RCNN 300->64
@@ -302,6 +310,7 @@ class DetectionModel(object):
     """
     proposal_boxes = tf.stack([proposal_boxlist.get() for proposal_boxlist 
         in proposal_boxlist_list])
+
 
     # [batch_num_proposals, crop_size/2, crop_size/2, depth] e.g. 64, 7, 7, 1024
     batched_roi_feature_maps = self._extract_roi_feature_maps(
@@ -428,8 +437,10 @@ class DetectionModel(object):
     """Extracts ROI feature maps based on predicted region proposals, and 
     resizes them to a fixed spatial dimension, followed by a 2x2 max pooling.
 
-    NOTE: `tf.image.crop_and_resize` performs ROI align rather than ROI pooling
-    used in Faster R-CNN.
+    NOTE: `tf.image.crop_and_resize` implements a variant of ROI align in which
+    each spatial cell of the output feature map is computed using bilinear 
+    interpolation based on the nearst four spatial cells of the input feature
+    map.
 
     Args:
       shared_feature_map: float tensor of shape 
@@ -456,6 +467,7 @@ class DetectionModel(object):
         tf.expand_dims(tf.range(shape[0]), axis=1), [1, shape[1]]), [-1])
     # [batch_size * max_num_proposals, crop_size, crop_size, depth] 
     # e.g. 64, 14, 14, 1024 
+
     regions_feature_maps = tf.image.crop_and_resize(
         shared_feature_map, proposal_boxes, box_indices, 
         (self._proposal_crop_size, self._proposal_crop_size))

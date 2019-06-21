@@ -45,7 +45,8 @@ def compute_losses(model, prediction_dict, gt_boxlist_list):
     (batch_loc_targets, 
      batch_loc_weights, 
      batch_cls_targets, 
-     batch_cls_weights, 
+     batch_cls_weights,
+     _, 
      match_list) = target_assigner.batch_assign_targets(
         model.target_assigner, anchors_boxlist_list, gt_boxlist_list)
 

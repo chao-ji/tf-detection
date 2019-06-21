@@ -109,16 +109,19 @@ class FasterRcnnModelTrainer(detection_model.DetectionModel):
       frcnn_mask_loss_weight: float scalar, scales the contribution of mask loss
         relative to total loss.
 
-      proposal_crop_size: int scalar, the height and width dimension of ROIs
-        extracted from the feature map shared by RPN and Fast RCNN.
+      proposal_crop_size: int scalar, ROI Align will be applied on the feature 
+        map shared by RPN and Fast RCNN, which produces ROI feature maps of 
+        spatial dimensions [proposal_crop_size, proposal_crop_size].
       rpn_minibatch_size: int scalar, a subset of `rpn_minibatch_size` anchors
         are sampled from the collection of all anchors in RPN for which losses 
         are computed and backpropogated. 
       frcnn_minibatch_size: int scalar, a subset of `frcnn_minibatch_size` 
-        proposals are sampled from the collection of proposal boxes output by
-        RPN to extract ROI feature maps for Fast RCNN.
+        proposals are sampled from the collection of NMS'ed proposal boxes 
+        output by RPN for which losses are computed and backpropogated. 
       rpn_box_predictor_depth: int scalar, the depth of feature map preceding
         rpn box predictor.
+      first_stage_atrous_rate: int scalar, the atrous rate of the Conv2d 
+        operation preceding rpn box predictor.
       freeze_batch_norm: bool scalar, whether to set batchnorm layers in test 
         mode or training mode. Defaults to True (i.e. test mode).
 
@@ -188,15 +191,16 @@ class FasterRcnnModelTrainer(detection_model.DetectionModel):
       grouped_update_op: an instance of tf.Operation, the grouped gradient 
         update op to be executed in a tf.Session.
       total_loss: float scalar tensor, total loss (localization + classification 
-        + regularization).
+        + regularization + optionally mask loss).
       global_step: int scalar tensor, global step.
     """
     misc_utils.check_dataset_mode(self, dataset)
-
+    # decode protobuf strings into tensor dict, and performs data augmentation
+    # and (padded-)batching
     tensor_dict = dataset.get_tensor_dict(filename_list)
-
+    # performs image resizing and pixel intensity normalization
     inputs = self.preprocess(tensor_dict[TensorDictFields.image])
-
+    # package groundturht tensors into a BoxList instance.
     gt_boxlist_list = misc_utils.preprocess_groundtruth(tensor_dict)
 
     rpn_prediction_dict = self.predict_rpn(inputs)

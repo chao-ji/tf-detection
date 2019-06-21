@@ -216,7 +216,7 @@ def to_image_size_masks(masks, boxes, image_height, image_width):
   (ymin - 0) k_y = 0 - YMIN           (xmin - 0) k_x = 0 - XMIN
   (ymax - 1) k_y = 1 - YMAX           (xmax - 1) k_x = 1 - XMAX
 
-  So
+  Solving for `YMIN`, `XMIN`, `YMAX`, `XMAX`: 
 
   YMIN = - ymin / (ymax - ymin)
   XMIN = - xmin / (xmax - xmin)

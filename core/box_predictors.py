@@ -183,6 +183,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
                   output_size,
                   self._kernel_size,
                   scope='BoxEncodingPredictor')
+
             # class score predictions branching out of `tensor`
             output_size = num_predictions * num_class_slots
             if self._use_depthwise:
@@ -200,7 +201,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
                   output_size,
                   self._kernel_size,
                   scope='ClassPredictor')
-                  
+
             batch, height, width, _ = (
                 shape_utils.combined_static_and_dynamic_shape(tensor))
 
@@ -261,6 +262,7 @@ class RcnnBoxPredictor(BoxPredictor):
         [batch_num_proposals, 1, num_classes + 1], holding one-hot
         encoded box class score predictions.
     """
+
     spatial_averaged_feature_map = tf.reduce_mean(
         feature_map, [1, 2], keepdims=True, name='AvgPool')
 

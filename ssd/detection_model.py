@@ -142,7 +142,7 @@ class DetectionModel(object):
       images: a float tensor of shape [batch_size, height, width, channels].
     """
     def _preprocess_single_image(image):
-      resized_image = self._image_resizer_fn(image)
+      resized_image, _ = self._image_resizer_fn(image)
       if self._normalizer_fn is not None:
         resized_image = self._normalizer_fn(resized_image)
       return resized_image

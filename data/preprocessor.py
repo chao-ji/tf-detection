@@ -471,6 +471,8 @@ def resize_image(image,
 
       new_masks = tf.cond(tf.greater(num_boxes, 0), resize_non_empty, resize_empty)
       result.append(new_masks)
+    else:
+      result.append(None)
 
     return result
 

@@ -24,14 +24,14 @@ def postprocess_frcnn(model,
     frcnn_prediction_dict: a dict mapping from strings to tensors,
       holding the following entries:
       { 'box_encoding_predictions': float tensor of shape 
-          [batch_size, max_num_boxes, num_classes, 4], 
+          [batch_size, max_num_proposals, num_classes, 4], 
         'class_predictions': float tensor of shape
-          [batch_size, max_num_boxes, num_class + 1].}
+          [batch_size, max_num_proposals, num_class + 1].}
     rpn_detection_dict: a dict mapping from strings to tensors/BoxLists,
       holding the following entries:
       { 'proposal_boxlist_list': a list of BoxList instances, each holding 
-          `max_num_boxes` proposal boxes (coordinates normalized). The fields
-          are potentially zero-padded up to `max_num_boxes`. Length of list
+          `max_num_proposals` proposal boxes (coordinates normalized). The fields
+          are potentially zero-padded up to `max_num_proposals`. Length of list
           is equal to `batch_size`. 
         'num_proposals': int tensor of shape [batch_size], holding the num of
           valid boxes (not zero-padded) in each BoxList of 
@@ -40,9 +40,9 @@ def postprocess_frcnn(model,
   Returns:
     frcnn_detection_dict: a dict mapping from strings to tensors,
       holding the following entries:
-      { 'boxes': float tensor of shape [batch_size, max_num_boxes, 4].
-        'scores': float tensor of shape [batch_size, max_num_boxes].
-        'classes': int tensor of shape [batch_size, max_num_boxes].
+      { 'boxes': float tensor of shape [batch_size, max_num_proposals, 4].
+        'scores': float tensor of shape [batch_size, max_num_proposals].
+        'classes': int tensor of shape [batch_size, max_num_proposals].
         'num_detections': int tensor of shape [batch_size], holding num of 
           valid (not zero-padded) detections in each of the above tensors.}
   """
@@ -130,10 +130,13 @@ def compute_rpn_loss(model, rpn_prediction_dict, gt_boxlist_list):
 
     # indicator of shape [batch_size, num_anchors], where each row sum to 
     # `rpn_minibatch_size`.
+    # indicating anchors for which objectness losses are computed.
     batch_sampled_indicator = tf.to_float(shape_utils.static_map_fn(
         rpn_minibatch_subsample_fn, [batch_cls_targets, batch_cls_weights]))
+
     # indicator of shape [batch_size, num_anchors], where each row sum to
-    # value < `rpn_minibatch_size`.
+    # value <= `rpn_minibatch_size` * pos_frac.
+    # indicator anchors for which localization losses are computed
     sampled_loc_indicator = batch_sampled_indicator * batch_loc_weights
     # [batch_size]
     sample_sizes = tf.reduce_sum(batch_sampled_indicator, axis=1)
@@ -145,6 +148,8 @@ def compute_rpn_loss(model, rpn_prediction_dict, gt_boxlist_list):
     cls_losses = model._rpn_classification_loss_fn(rpn_objectness_predictions, 
         batch_cls_targets, weights=batch_sampled_indicator)
 
+    # normalize loc and cls loss of shape [batch_size, num_anchors] over anchors
+    # in a image, and over images in a batch
     loc_loss = tf.reduce_mean(tf.reduce_sum(loc_losses, axis=1) / sample_sizes)
     cls_loss = tf.reduce_mean(tf.reduce_sum(cls_losses, axis=1) / sample_sizes)
 
@@ -167,15 +172,15 @@ def compute_frcnn_loss(model,
     frcnn_prediction_dict: a dict mapping from strings to tensors,
       holding the following entries:
       { 'box_encoding_predictions': float tensor of shape 
-          [batch_size, max_num_boxes, num_classes, 4], 
+          [batch_size, max_num_proposals, num_classes, 4], 
         'class_predictions': float tensor of shape
-          [batch_size, max_num_boxes, num_classes + 1]}
+          [batch_size, max_num_proposals, num_classes + 1]}
     rpn_detection_dict: a dict mapping from strings to tensors/BoxLists,
       holding the following entries:
       { 'proposal_boxlist_list':  a list of BoxList instances, each holding 
-          `max_num_boxes` proposal boxes (coordinates normalized). The fields
-          are potentially zero-padded up to `max_num_boxes`. Length of list
-          is equal to `batch_size`. 
+          `max_num_proposals` proposal boxes (coordinates normalized). The 
+          fields are potentially zero-padded up to `max_num_proposals`. Length 
+          of list is equal to `batch_size`. 
         'num_proposals': int tensor of shape [batch_size], holding the num of
           valid boxes (not zero-padded) in each BoxList of 
           `proposal_boxlist_list`.}
@@ -313,12 +318,15 @@ def sample_frcnn_minibatch(model,
 
   The decoded, nms'ed, and clipped proposal boxes from RPN are further sampled 
   to an even smaller set to be used for extracting ROI feature maps for Fast 
-  RCNN. 
+  RCNN. Note: the sampling takes into account the label of each proposal boxes,
+  determined by target assigner. So we DON'T have to run target assigner AGAIN. 
 
   Args:
     model: an instance of DetectionModel. 
-    batch_proposal_boxes: float tensor of shape [batch_size, num_boxes, 4].
-    batch_num_proposals: int tensor of shape [batch_size].
+    batch_proposal_boxes: float tensor of shape [batch_size, max_num_proposals,
+      4], nms'ed proposals, potentially padded.
+    batch_num_proposals: int tensor of shape [batch_size], holding actual number
+      of non-padded proposal boxes.
     gt_boxlist_list: a list of BoxList instances, each holding `num_gt_boxes`
       groundtruth boxes, with extra field 'labels' holding float tensor of shape
       [num_gt_boxes, num_class + 1] (groundtruth boxes labels). Length of 
@@ -326,8 +334,8 @@ def sample_frcnn_minibatch(model,
 
   Returns: 
     proposal_boxlist_list: a list of BoxList instances, each holding 
-      `max_num_boxes` proposal boxes (coordinates normalized). The fields
-      are potentially zero-padded up to `max_num_boxes`. Length of list
+      `max_num_proposals` proposal boxes (coordinates normalized). The fields
+      are potentially zero-padded up to `max_num_proposals`. Length of list
       is equal to `batch_size`.
     batch_num_proposals: int tensor of shape [batch_size], holding num of 
       sampled proposals in `proposal_boxlist_list`.
@@ -345,6 +353,7 @@ def sample_frcnn_minibatch(model,
 
     sampled_proposal_boxlist = _sample_frcnn_minibatch_per_image(
         model, proposal_boxlist, gt_boxlist)
+    # re-pad the proposal boxes back to size `max_num_proposals`
     padded_proposal_boxlist = box_list_ops.pad_or_clip_box_list(
         sampled_proposal_boxlist, size=model._frcnn_minibatch_size)
 
@@ -366,22 +375,26 @@ def _sample_frcnn_minibatch_per_image(model,
 
   Args:
     model: a DetectionModel instance.
-    proposal_boxlist: a BoxList instance holding `in_num_boxes` proposal boxes
-      of a single image. Note that zero-padded proposal boxes have been removed.
+    proposal_boxlist: a BoxList instance holding `in_num_proposals` proposal 
+      boxes of a single image. Note that zero-padded proposal boxes have been 
+      removed.
     gt_boxlist: a BoxList instance holding `num_gt_boxes` groundtruth boxes 
       labels of a single image.
 
   Returns:
-    sampled_proposal_boxlist: a BoxList instance holding `out_num_boxes` 
-      proposal boxes sampled from `proposal_boxlist`, where `in_num_boxes` <=
-      `out_num_boxes`.
+    sampled_proposal_boxlist: a BoxList instance holding `out_num_proposals` 
+      proposal boxes sampled from `proposal_boxlist`, where `in_num_proposals` 
+      <= `out_num_proposals`.
   """
   (loc_targets, loc_weights, cls_targets, cls_weights, msk_targets, _
       ) = model._frcnn_target_assigner.assign(proposal_boxlist, gt_boxlist)
 
+  # `cls_weights` is set to ones of shape [max_num_proposals] if all proposals
+  # have classification weight being 0.
   cls_weights += tf.to_float(tf.equal(tf.reduce_sum(cls_weights), 0))
   positive_indicator = tf.greater(tf.argmax(cls_targets, axis=1), 0)
 
+  # [max_num_proposals], indicator matrix sum to val <= `frcnn_minibatch_size`
   sampled_indicator = model._frcnn_minibatch_sampler_fn(
       tf.cast(cls_weights, tf.bool),
       model._frcnn_minibatch_size,
@@ -522,9 +535,9 @@ def postprocess_masks(mask_predictions, frcnn_detection_dict):
       [batch_num_proposals, num_classes, mask_height, mask_width] 
     frcnn_detection_dict: a dict mapping from strings to tensors,
       holding the following entries:
-      { 'boxes': float tensor of shape [batch_size, max_num_boxes, 4].
-        'scores': float tensor of shape [batch_size, max_num_boxes].
-        'classes': int tensor of shape [batch_size, max_num_boxes].
+      { 'boxes': float tensor of shape [batch_size, max_num_proposals, 4].
+        'scores': float tensor of shape [batch_size, max_num_proposals].
+        'classes': int tensor of shape [batch_size, max_num_proposals].
         'num_detections': int tensor of shape [batch_size], holding num of 
           valid (not zero-padded) detections in each of the above tensors.}
 

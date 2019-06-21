@@ -60,10 +60,13 @@ class FasterRcnnModelInferencer(detection_model.DetectionModel):
       rpn_score_conversion_fn: a callable that converts raw predicted class 
         logits into probability scores.
 
-      proposal_crop_size: int scalar, the height and width dimension of ROIs
-        extracted from the feature map shared by RPN and Fast RCNN.
+      proposal_crop_size: int scalar, ROI Align will be applied on the feature 
+        map shared by RPN and Fast RCNN, which produces ROI feature maps of 
+        spatial dimensions [proposal_crop_size, proposal_crop_size].
       rpn_box_predictor_depth: int scalar, the depth of feature map preceding
         rpn box predictor.
+      first_stage_atrous_rate: int scalar, the atrous rate of the Conv2d 
+        operation preceding rpn box predictor.
     """
     super(FasterRcnnModelInferencer, self).__init__(
         image_resizer_fn=image_resizer_fn,

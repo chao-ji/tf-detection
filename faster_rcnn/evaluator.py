@@ -95,23 +95,26 @@ class FasterRcnnModelEvaluator(detection_model.DetectionModel):
         logits into probability scores. 
 
       rpn_localization_loss_weight: float scalar, scales the contribution of 
-        localization loss relative to classification loss. 
+        localization loss relative to total loss. 
       rpn_classification_loss_weight: float scalar, scales the contribution of
-        classification loss relative to localization loss.
+        classification loss relative to total loss.
       frcnn_localization_loss_weight: float scalar, scales the contribution of
-        localization loss relative to classification loss.
+        localization loss relative to total loss.
       frcnn_classification_loss_weight: float scalar, scales the contribution
-        of classification loss relative to localization loss.
+        of classification loss relative to total loss.
       frcnn_mask_loss_weight: float scalar, scales the contribution of mask loss
-        relative to localization loss and classification loss.
+        relative to total loss.
 
-      proposal_crop_size: int scalar, the height and width dimension of ROIs
-        extracted from the feature map shared by RPN and Fast RCNN.
+      proposal_crop_size: int scalar, ROI Align will be applied on the feature 
+        map shared by RPN and Fast RCNN, which produces ROI feature maps of 
+        spatial dimensions [proposal_crop_size, proposal_crop_size].
       rpn_minibatch_size: int scalar, a subset of `rpn_minibatch_size` anchors
         are sampled from the collection of all anchors in RPN for which losses 
         are computed and backpropogated. 
       rpn_box_predictor_depth: int scalar, the depth of feature map preceding
         rpn box predictor.
+      first_stage_atrous_rate: int scalar, the atrous rate of the Conv2d 
+        operation preceding rpn box predictor.
     """
     super(FasterRcnnModelEvaluator, self).__init__(
         image_resizer_fn=image_resizer_fn,

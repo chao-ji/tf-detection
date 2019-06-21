@@ -165,9 +165,11 @@ class SsdModelEvaluator(detection_model.DetectionModel):
 
     inputs = self.preprocess(image_list)
 
-    gt_boxlist_list = misc_utils.preprocess_groundtruth(
-        tensor_dict[TensorDictFields.groundtruth_boxes],
-        tensor_dict[TensorDictFields.groundtruth_labels])
+#    gt_boxlist_list = misc_utils.preprocess_groundtruth(
+#        tensor_dict[TensorDictFields.groundtruth_boxes],
+#        tensor_dict[TensorDictFields.groundtruth_labels])
+
+    gt_boxlist_list = misc_utils.preprocess_groundtruth(tensor_dict)
 
     prediction_dict = self.predict(inputs)
 
