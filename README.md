@@ -7,7 +7,7 @@ Object Detection is the task of localizing and classifying instances of objects 
 
   <img src="g3doc/images/mask.jpg" width="600">
   <br>
-  Top: Object Detection (output is bounding box); Bottom: Instance Segmentation (output is instance mask)
+  Top: Object Detection (outputs bounding box); Bottom: Instance Segmentation (outputs instance mask on top of bounding box)
 
 </p>
 
