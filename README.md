@@ -2,7 +2,15 @@
 
 Object Detection is the task of localizing and classifying instances of objects of certain classes (e.g. dogs, cars, tables) in digital images or videos. An object detector can automatically draw bounding boxes that tightly enclose the detected instances, and label each instance with the predicted object class and a confidence score. Some object detectors can even add pixel-wise instance masks (aka instance segmentation), providing visually more informative annotations.
 
-<p align="center "><img src="g3doc/images/dining_room.jpg" width="500"></p>
+<p align="center ">
+  <img src="g3doc/images/box.jpg" width="600"> 
+
+  <img src="g3doc/images/mask.jpg" width="600">
+  <br>
+  Top: Object Detection (output is bounding box); Bottom: Instance Segmentation (output is instance mask)
+
+</p>
+
 
 This repository contains tensorflow implementations of **multiple** modern (i.e. convolutional neural network based) object detection systems. The idea is that object detection systems are usually composed of multiple modules (data augmentation, anchor generation, target assignment, non maximum suppression, etc.), and most of the time they can be reused across different models (e.g. SSD, YOLO, Faster R-CNN). The flexibility allows one to maintain existing and add additional models with minimal effort.
 
@@ -114,6 +122,18 @@ AP\@0.50:0.95(M) |0.2941|0.3349|
 AP\@0.50:0.95(L) |0.4693|0.4770|
 
 The trained model was evaluated on the val split of COCO 2017 (5k images). The mask AP was 0.318, which is comparable to the mask AP of 0.327 (evaluated on the same validation set) reported in the Mask R-CNN paper (Table 2a). The model was trained for 2.4M minibatches (took > 500 hrs on my single GPU machine), and it is possible to see better performance if trained for more iterations. 
+
+##### Sample Outputs
+<p align="center ">
+  <img src="g3doc/images/apple_store_at_cuptertino.jpg" width="750">
+
+  <img src="g3doc/images/palm_drive_at_stanford.jpg" width="750">
+
+  <img src="g3doc/images/pennsylvania_ave_at_dc.jpg" width="750">
+
+</p>
+
+
 
 ## Acknowledgements
 This implementation was inspired by and borrows code from the Official TensorFlow Object Detection API. My goal was to thoroughly understand how object detection models work, and the best way to achieve this is by building rather than just reading papers and blog posts. However, a lot of implementation details are left out in most papers, and one would need a reference implementation to understand exactly how different modules (e.g. anchor generation, target assignments for anchors/proposals, non-maximum suppression, etc.) work. The offical Tensorflow object detection API provides implementaions of most popular object detection models in the literature (the other being Detectron from Facebook Research), and uses Protocol buffer to manage hyperparameter settings, and uses abstractions of `BoxList` (for groundtruth boxes, anchors, and proposals), `BoxPredictor` and `BoxCoder`, which are also adopted in this repository. 
