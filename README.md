@@ -27,16 +27,14 @@ As of June 2019, Single Shot Detector (SSD), Faster R-CNN, and Mask R-CNN are im
 
 ## Experiments
 
-This section presents results of training and evaluating object detection models on public datasets.
+This section presents results of training and evaluating object detection (and instance segmentation) models on public datasets.
 
 ### Object Detection
 
 
 #### Pascal VOC dataset
-The following combinations of object detector and feature extractor were trained on the union of the `trainval` splits of Pascal VOC 2007 and `trainval` splits of VOC 2012, and were evaluated on the VOC 2007 `test` split. The goal is to achieve comparable results prepresented in the respective papers so similar parameter settings were used.
+The following combinations of object detector and feature extractor were trained on the union of **trainval** of VOC2007 and **trainval** of VOC2012, and were evaluated on the **test** of VOC2007. 
 
-
-**AP\@0.5**: a detected box is considered as true positive if it overlaps a groundtruth box of the same object class with IOU >= 0.5.
 
 object detector|SSD|SSD|Faster R-CNN|Faster R-CNN|
 -|-|-|-|-|
@@ -69,7 +67,6 @@ tvmonitor| 0.7132| 0.6404|0.7442|0.7666
 #### COCO dataset
 The following combinations of object detector and feature extractor were trained on the train2017 split (118k images) of COCO dataset, and evaluated on val2017 split (5k images).
 
-**AP\@x**: a detected box is considered as true positive if it overlaps a groundtruth box of the same object class with IOU >= x. So **AP\@0.50:0.95** is averaged over **AP\@0.50**, **AP\@0.55**, ..., **AP\@0.95**.  
 
 object detector |SSD|Faster R-CNN|
 -|-|-|
@@ -82,33 +79,44 @@ AP\@0.50:0.95(M) |0.103| 0.245 |
 AP\@0.50:0.95(L) |0.377| 0.422 |
 
 
+See [ssd](configs/ssd/) and [faster_rcnn](configs/faster_rcnn/) for the full hyperparameter settings.
+
 ### Instance Segmentation
 
+#### COCO dataset
 Since PASCAL VOC dataset does not provide instance masks, so Mask R-CNN was trained and evaluated on COCO dataset (2017).
 
 Hyperparameters:
 * Backbone: resnet101-v1 with output stride 8
 * Anchor: four scales (0.25, 0.5, 1.0, 2.0) and three aspect ratios (0.5, 1.0, 2.0)
 * Mask size: 33 x 33
+* Num of convolutional layers in the mask prediction branch: 4
+* Max num of proposals by NMS: 300
 * Batch size: one image per minibatch
-* Data augmentation: horizontal flip
-* Training schedule: fixed learninng rate 2e-4 for 1.6M minibatches, and then 2e-5 for 0.8M minibatches
+* Data augmentation: random horizontal flip
+* learning rate schedule: fixed learninng rate 2e-4 for 1.6M minibatches, and then 2e-5 for an additional 0.8M minibatches
+* Optimizer: SGD w/ momentum 0.9
 
-#### COCO dataset
-object detector |Mask R-CNN|
--|-|
-**feature extractor**|**resnet101-v1**|
-AP\@0.50:0.95 |**0.3181**|
-AP\@0.50 |0.5178| 
-AP\@0.75 |0.3365|
-AP\@0.50:0.95(S) |0.0889|
-AP\@0.50:0.95(M) |0.2941|
-AP\@0.50:0.95(L) |0.4693|
+See [this](configs/mask_rcnn) for the full hyperparameter settings. The checkpoint of the trained model is available at [download](https://www.dropbox.com/sh/bnj0rcijn1q4xih/AADjwqxcHWNpBnPwo5bRq7Kta?dl=0).
 
-The trained model was evaluated on the val split of COCO 2017 (5k images). The mask AP was 0.318, which is comparable to the mask AP of 0.327 (evaluated on the same validation set) reported in the Mask R-CNN paper (Table 2a). The model was trained for 2.4M minibatches (took > 500 hrs on my Single GPU machine), and it is possible to improve if trained for more minibatches. 
+**Note**: both box AP and mask AP are used as evaluation metric since Mask R-CNN outputs both boxes and instance masks.
+
+
+object detector |Mask R-CNN|Mask R-CNN|
+-|-|-|
+**feature extractor**|**resnet101-v1**|**resnet101-v1**|
+metrics|mask AP| box AP|
+AP\@0.50:0.95 |**0.3181**|0.3490|
+AP\@0.50 |0.5178|0.5491|
+AP\@0.75 |0.3365|0.3789|
+AP\@0.50:0.95(S) |0.0889|0.1280|
+AP\@0.50:0.95(M) |0.2941|0.3349|
+AP\@0.50:0.95(L) |0.4693|0.4770|
+
+The trained model was evaluated on the val split of COCO 2017 (5k images). The mask AP was 0.318, which is comparable to the mask AP of 0.327 (evaluated on the same validation set) reported in the Mask R-CNN paper (Table 2a). The model was trained for 2.4M minibatches (took > 500 hrs on my single GPU machine), and it is possible to see better performance if trained for more iterations. 
 
 ## Acknowledgements
-This implementation was inspired by and borrows code from the Official TensorFlow Object Detection API. My goal was to thoroughly understand how object detection models work, and the best way to achieve this is by building rather than just reading papers and blog posts. However, a lot of implementation details are left out in most papers, and one would need a reference implementation to understand exactly how different modules (e.g. anchor generation, target assignments for anchors/proposals, non-maximum suppression, etc.) work. The offical Tensorflow object detection API provides implementaions of most popular object detection models in the literature (the other being Detectron from Facebook Research), and uses abstractions of `BoxList` (for groundtruth boxes, anchors, and proposals), `BoxPredictor` and `BoxCoder`, which are also used in this repository. 
+This implementation was inspired by and borrows code from the Official TensorFlow Object Detection API. My goal was to thoroughly understand how object detection models work, and the best way to achieve this is by building rather than just reading papers and blog posts. However, a lot of implementation details are left out in most papers, and one would need a reference implementation to understand exactly how different modules (e.g. anchor generation, target assignments for anchors/proposals, non-maximum suppression, etc.) work. The offical Tensorflow object detection API provides implementaions of most popular object detection models in the literature (the other being Detectron from Facebook Research), and uses Protocol buffer to manage hyperparameter settings, and uses abstractions of `BoxList` (for groundtruth boxes, anchors, and proposals), `BoxPredictor` and `BoxCoder`, which are also adopted in this repository. 
 
 ## References
 
