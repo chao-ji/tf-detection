@@ -124,13 +124,18 @@ AP\@0.50:0.95(L) |0.4693|0.4770|
 The trained model was evaluated on the val split of COCO 2017 (5k images). The mask AP was 0.318, which is comparable to the mask AP of 0.327 (evaluated on the same validation set) reported in the Mask R-CNN paper (Table 2a). The model was trained for 2.4M minibatches (took > 500 hrs on my single GPU machine), and it is possible to see better performance if trained for more iterations. 
 
 ##### Sample Outputs
-<p align="center ">
+Static images:
+<p align="center">
   <img src="g3doc/images/apple_store_at_cuptertino.jpg" width="750">
 
   <img src="g3doc/images/palm_drive_at_stanford.jpg" width="750">
 
   <img src="g3doc/images/pennsylvania_ave_at_dc.jpg" width="750">
+</p>
 
+Applying Mask R-CNN on gif file frame-by-frame (I filmed this video near the Ferry Building in San Francisco).  
+<p align="center">
+  <img src="g3doc/images/ferrybldg.gif">
 </p>
 
 
